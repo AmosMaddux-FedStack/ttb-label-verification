@@ -2,7 +2,8 @@
 
 ## Current Status
 
-Phase 0 is complete and deployed.
+Phase 0 is complete and deployed. Phase 1 comparison engine is implemented locally and all tests
+pass.
 
 Live app:
 
@@ -37,6 +38,12 @@ Phase 0 commit:
 
 ```text
 b03d79a Scaffold Phase 0 FastAPI health app
+```
+
+Phase 0 deployment docs commit:
+
+```text
+bd16dc7 Document Phase 0 deployment progress
 ```
 
 Push command used:
@@ -189,7 +196,73 @@ app/static/styles.css
 tests/test_health.py
 ```
 
-`Docs/Phase_0_plan.md` contains the finalized Phase 0 plan.
+`Docs/Plan.md` contains the Phase 0 plan and finalized Phase 1 plan.
+
+## Phase 1 Comparison Engine
+
+Phase 1 adds pure Python comparison logic for structured application data against structured label
+extraction data. This phase does not include model calls, image handling, upload flow, database
+state, or UI work.
+
+Files added:
+
+```text
+app/verification/__init__.py
+app/verification/models.py
+app/verification/comparisons.py
+tests/test_verification_comparisons.py
+```
+
+Implemented models:
+
+- `ApplicationData`
+- `ExtractedLabel`
+- `FieldResult`
+- `VerificationResult`
+
+Implemented comparison functions:
+
+- `compare_brand_name`
+- `compare_product_class`
+- `compare_producer`
+- `compare_country_of_origin`
+- `compare_abv`
+- `compare_net_contents`
+- `compare_government_warning`
+- `verify_label`
+
+Phase 1 verification command:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache UV_PYTHON_INSTALL_DIR=/tmp/uv-python uv run pytest
+```
+
+Latest result:
+
+```text
+47 passed in 0.23s
+```
+
+Strict government warning behavior:
+
+- Exact all-caps warning passes.
+- Title-case warning fails.
+- Lowercase warning fails.
+- Warning missing the colon fails.
+- Missing punctuation fails.
+- Extra space fails.
+- Missing extracted warning fails.
+- Reworded warning fails.
+- Misread warning failures preserve the exact extracted warning text in `FieldResult.extracted_value`.
+
+The implementation uses strict case-sensitive equality for the government warning:
+
+```python
+status = "PASS" if application == extracted else "FAIL"
+```
+
+The Phase 1 work honored the no-network requirement. No new dependency was installed during
+execution; fuzzy matching is currently deterministic local standard-library logic.
 
 ## Important Decisions
 
