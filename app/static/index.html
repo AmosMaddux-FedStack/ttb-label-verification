@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TTB Label Verification</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="page">
+      <section class="status-panel" aria-labelledby="page-title">
+        <p class="eyebrow">Phase 0</p>
+        <h1 id="page-title">TTB Label Verification</h1>
+        <p class="lede">Deployment check</p>
+
+        <div id="health-card" class="health-card pending" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <p class="status-label">Checking backend</p>
+            <pre id="health-response">{}</pre>
+          </div>
+        </div>
+
+        <button id="retry-button" type="button">Retry</button>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
