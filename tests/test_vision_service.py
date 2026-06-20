@@ -1,0 +1,215 @@
+import json
+from io import BytesIO
+from pathlib import Path
+
+import pytest
+from PIL import Image
+
+from app.verification.models import ExtractedLabel
+from app.vision.client import VisionClientResult, VisionConfigurationError
+from app.vision.fakes import FakeVisionClient
+from app.vision.preprocessing import prepare_image
+from app.vision.service import (
+    EXTRACTION_PROMPT,
+    VisionService,
+    build_extracted_label_schema,
+    null_extracted_label,
+)
+
+
+def image_bytes(size: tuple[int, int] = (600, 400), image_format: str = "PNG") -> bytes:
+    image = Image.new("RGB", size, color=(255, 255, 255))
+    buffer = BytesIO()
+    image.save(buffer, format=image_format)
+    return buffer.getvalue()
+
+
+def populated_payload() -> dict[str, str]:
+    return {
+        "brand_name": "Acme Reserve",
+        "product_class": "Red Wine",
+        "producer": "Acme Winery LLC",
+        "country_of_origin": "United States",
+        "abv": "13.5% Alc. by Vol.",
+        "net_contents": "750 mL",
+        "government_warning": "GOVERNMENT WARNING: exact text",
+    }
+
+
+def test_preprocessing_downscales_large_images_and_outputs_jpeg_rgb() -> None:
+    prepared = prepare_image(image_bytes(size=(3000, 1200)))
+
+    assert prepared.content_type == "image/jpeg"
+    assert prepared.width == 1600
+    assert prepared.height == 640
+    assert prepared.data.startswith(b"\xff\xd8")
+
+    reopened = Image.open(BytesIO(prepared.data))
+    assert reopened.format == "JPEG"
+    assert reopened.mode == "RGB"
+
+
+def test_preprocessing_does_not_enlarge_small_images() -> None:
+    prepared = prepare_image(image_bytes(size=(500, 300)))
+
+    assert prepared.width == 500
+    assert prepared.height == 300
+
+
+def test_schema_matches_extracted_label_and_disallows_extra_properties() -> None:
+    schema = build_extracted_label_schema()
+
+    assert set(schema["properties"]) == set(ExtractedLabel.model_fields)
+    assert schema["required"] == list(ExtractedLabel.model_fields)
+    assert schema["additionalProperties"] is False
+    assert all(
+        property_schema["type"] == ["string", "null"]
+        for property_schema in schema["properties"].values()
+    )
+
+
+def test_prompt_forces_verbatim_government_warning_capture() -> None:
+    prompt = EXTRACTION_PROMPT.lower()
+
+    for phrase in [
+        "verbatim character by character",
+        "capitalization",
+        "punctuation",
+        "colon",
+        "spacing",
+        "line breaks",
+        "spelling",
+        "do not correct",
+        "do not normalize",
+    ]:
+        assert phrase in prompt
+
+
+@pytest.mark.anyio
+async def test_service_returns_complete_structured_data_from_fake_client() -> None:
+    fake = FakeVisionClient(VisionClientResult(structured_data=populated_payload()))
+    service = VisionService(client=fake)
+
+    extracted = await service.extract_label(image_bytes())
+
+    assert fake.calls == 1
+    assert fake.last_model == "gpt-5.4-mini"
+    assert fake.last_detail == "high"
+    assert extracted.brand_name == "Acme Reserve"
+    assert extracted.government_warning == "GOVERNMENT WARNING: exact text"
+
+
+@pytest.mark.anyio
+async def test_service_returns_partial_null_data() -> None:
+    payload = populated_payload()
+    payload["producer"] = None
+    payload["government_warning"] = None
+    service = VisionService(client=FakeVisionClient(VisionClientResult(structured_data=payload)))
+
+    extracted = await service.extract_label(image_bytes())
+
+    assert extracted.brand_name == "Acme Reserve"
+    assert extracted.producer is None
+    assert extracted.government_warning is None
+
+
+@pytest.mark.anyio
+async def test_blurry_or_glare_response_does_not_throw() -> None:
+    service = VisionService(client=FakeVisionClient(VisionClientResult(structured_data={"brand_name": None})))
+
+    extracted = await service.extract_label(image_bytes())
+
+    assert extracted == null_extracted_label()
+
+
+@pytest.mark.anyio
+async def test_non_label_image_returns_all_nulls() -> None:
+    service = VisionService(client=FakeVisionClient(VisionClientResult(structured_data=null_extracted_label().model_dump())))
+
+    extracted = await service.extract_label(image_bytes())
+
+    assert extracted == null_extracted_label()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "result",
+    [
+        VisionClientResult(structured_data=None, raw_json=None),
+        VisionClientResult(raw_json="{not json"),
+        VisionClientResult(structured_data={**populated_payload(), "extra": "not allowed"}),
+        VisionClientResult(structured_data={**populated_payload(), "brand_name": 123}),
+        VisionClientResult(structured_data={"brand_name": "missing required keys"}),
+    ],
+)
+async def test_malformed_structured_responses_return_all_nulls(result: VisionClientResult) -> None:
+    service = VisionService(client=FakeVisionClient(result))
+
+    extracted = await service.extract_label(image_bytes())
+
+    assert extracted == null_extracted_label()
+
+
+@pytest.mark.anyio
+async def test_json_response_is_parsed_defensively() -> None:
+    service = VisionService(client=FakeVisionClient(VisionClientResult(raw_json=json.dumps(populated_payload()))))
+
+    extracted = await service.extract_label(image_bytes())
+
+    assert extracted.brand_name == "Acme Reserve"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("error", [TimeoutError("timeout"), RuntimeError("sdk error")])
+async def test_api_timeout_or_client_error_returns_all_nulls(error: Exception) -> None:
+    service = VisionService(client=FakeVisionClient(error))
+
+    extracted = await service.extract_label(image_bytes())
+
+    assert extracted == null_extracted_label()
+
+
+@pytest.mark.anyio
+async def test_structured_object_is_preferred_over_raw_text() -> None:
+    fake = FakeVisionClient(
+        VisionClientResult(
+            structured_data=populated_payload(),
+            raw_json="{bad raw text that must not be used",
+        )
+    )
+    service = VisionService(client=fake)
+
+    extracted = await service.extract_label(image_bytes())
+
+    assert extracted.brand_name == "Acme Reserve"
+
+
+@pytest.mark.anyio
+async def test_non_image_bytes_return_all_nulls_without_calling_client() -> None:
+    fake = FakeVisionClient(VisionClientResult(structured_data=populated_payload()))
+    service = VisionService(client=fake)
+
+    extracted = await service.extract_label(b"not an image")
+
+    assert fake.calls == 0
+    assert extracted == null_extracted_label()
+
+
+def test_missing_api_key_produces_controlled_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(VisionConfigurationError):
+        VisionService.from_env()
+
+
+def test_env_model_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("VISION_MODEL", "custom-vision-model")
+
+    service = VisionService.from_env(client=FakeVisionClient(VisionClientResult(structured_data=populated_payload())))
+
+    assert service.model == "custom-vision-model"
+
+
+def test_sample_script_exists() -> None:
+    assert Path("scripts/run_sample_extraction.py").exists()

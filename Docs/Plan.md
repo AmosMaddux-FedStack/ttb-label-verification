@@ -420,3 +420,111 @@ Verification result tests:
 - Government warning is intentionally strict per project rules, even if OCR introduces small
   whitespace, punctuation, or case differences.
 - The ABV parser must avoid accidentally comparing proof numbers as ABV when both are present.
+
+
+
+# Phase 2 Plan: VisionService For Structured Label Extraction
+
+## Summary
+
+Add a `VisionService` that accepts one label image and returns the existing `ExtractedLabel` Pydantic model from `app/verification/models.py`. This phase introduces AI only for extraction, not verification: comparison remains the deterministic Phase 1 engine.
+
+Use the OpenAI Responses API with `gpt-5.4-mini` by default, configurable via `VISION_MODEL`. OpenAI’s current docs say current GPT models support image input and vision; Structured Outputs should be used over JSON mode when schema adherence matters. Sources: [Models](https://developers.openai.com/api/docs/models), [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [Images and vision](https://developers.openai.com/api/docs/guides/images-vision).
+
+## Review Result
+
+Phase 2 is approved with the clarifications and test additions below.
+
+- Government warning capture: the prompt must make verbatim warning transcription the highest-priority extraction requirement. It must say not to correct casing, punctuation, spacing, line breaks, spelling, or wording, and to return `null` if the warning cannot be read character-by-character.
+- Non-label image: a valid image that is not an alcohol beverage label must return an all-null `ExtractedLabel` and must not throw.
+- Model timeout/API error: timeout or OpenAI client failure must return an all-null `ExtractedLabel`, log a concise warning, and let downstream verification produce `NEEDS_REVIEW`.
+- Malformed structured output: parsing must be defensive against missing output, malformed JSON, extra keys, wrong types, or schema validation errors. The service must catch parse/validation failures and return an all-null `ExtractedLabel` without leaking raw model text to users.
+- Mockability: `VisionService` must accept an injected client/adapter and must expose a small fakeable interface so Phase 2 and Phase 3 tests never need real OpenAI API calls.
+
+## Key Changes
+
+- Add `app/vision/service.py` with an async `VisionService.extract_label(image_bytes, filename=None, content_type=None) -> ExtractedLabel`.
+- Add `app/vision/preprocessing.py` for deterministic image preparation using Pillow: EXIF-correct orientation, RGB conversion, downscale long edge to 1600px, JPEG re-encode at quality 82, and cap oversized payloads before model submission.
+- Add `app/vision/client.py` with a small `VisionClientProtocol` / adapter boundary around the OpenAI SDK. `VisionService` receives this client through its constructor so tests can pass a fake client.
+- Add dependencies: `openai` and `pillow`; update `.env.example` with placeholder names only: `OPENAI_API_KEY=` and `VISION_MODEL=gpt-5.4-mini`.
+- Keep secrets in environment variables only. The service reads `OPENAI_API_KEY` from env and never accepts keys through request payloads or committed config.
+- Do not add an upload API or UI in this phase unless approved later; this is the service layer plus tests.
+
+## Structured Extraction Behavior
+
+- Send the preprocessed image to the Responses API as image input with `detail: "high"` because label text and the government warning require readable fine detail.
+- Request Structured Outputs with a strict JSON schema matching `ExtractedLabel`: `brand_name`, `product_class`, `producer`, `country_of_origin`, `abv`, `net_contents`, and `government_warning`, each `string | null`, with no extra properties.
+- Parse only the structured response object and validate it with `ExtractedLabel.model_validate`; do not regex, substring, or string-parse the model response.
+- Treat missing structured output, malformed JSON, wrong field types, extra properties, or Pydantic validation errors as controlled extraction failure. Return an all-null `ExtractedLabel` and log a concise warning.
+- For blurry, angled, glare-obscured, cropped, or partially unreadable images, return partial data with unreadable fields as `null`; do not throw just because image quality is poor.
+- For a valid image that is not an alcohol beverage label, return an all-null `ExtractedLabel`; do not guess values from nearby text or scene context.
+- For non-image bytes or preprocessing failure, return an all-null `ExtractedLabel` and log a concise warning, since the downstream verifier will produce `NEEDS_REVIEW`.
+- For model timeout, rate-limit, network failure, SDK error, or response refusal, return an all-null `ExtractedLabel` and log a concise warning without exposing raw provider error text to the end user.
+
+Extraction prompt:
+
+```text
+You are extracting text fields from a photographed alcohol beverage label for a TTB label verification proof of concept.
+
+Return only the structured JSON object required by the provided schema. Do not include explanations, markdown, or extra keys.
+
+Extract these seven fields:
+
+1. brand_name
+   The brand name shown on the label.
+
+2. product_class
+   The product type or class shown on the label, such as wine, red wine, vodka, whiskey, beer, cider, or another visible class/type statement.
+
+3. producer
+   The producer, bottler, importer, winery, brewery, distillery, or responsible company shown on the label.
+
+4. country_of_origin
+   The country of origin shown on the label.
+
+5. abv
+   The alcohol by volume statement exactly as visible, such as "13.5% Alc. by Vol." or "40% ALC/VOL".
+
+6. net_contents
+   The net contents statement exactly as visible, such as "750 mL", "1 L", or "12 FL OZ".
+
+7. government_warning
+   The government warning text exactly as visible on the label. This field is critical because the downstream verifier requires an exact, case-sensitive match.
+
+Rules:
+- If a field is not visible, unreadable, blocked by glare, too blurry, cut off, or uncertain, return null for that field.
+- Do not guess or infer values from context.
+- For government_warning, transcribe the visible warning verbatim character by character.
+- Preserve the government_warning exact wording, capitalization, punctuation, colon, parentheses, periods, spacing, and line breaks as much as the image allows.
+- Do not correct the government_warning into the standard legal text.
+- Do not fix capitalization, spelling, punctuation, spacing, or wording in the government_warning.
+- Do not normalize the government_warning.
+- Do not summarize or rewrite the government_warning.
+- If the government_warning is present but you cannot read it character by character, return null for government_warning.
+- For all other fields, copy the visible text as closely as possible without adding information.
+- If the image is not an alcohol beverage label, return null for all fields.
+- Return partial data when only some fields are readable.
+```
+
+## Test Plan
+
+- Unit-test preprocessing with generated in-memory images: large image is downscaled, orientation path is handled, output is JPEG/RGB, and small images are not enlarged.
+- Unit-test prompt/schema construction: exactly the seven existing `ExtractedLabel` fields are requested, fields are nullable, extra properties are disallowed, and the government-warning instruction says verbatim/exact.
+- Unit-test prompt/schema construction: government-warning instructions explicitly forbid correcting casing, punctuation, colon, spacing, spelling, wording, or line breaks.
+- Unit-test service parsing with a fake OpenAI client returning complete structured data.
+- Unit-test partial extraction: fake response omits unreadable fields as `null`, and service returns an `ExtractedLabel` with those nulls.
+- Unit-test blurry/glare behavior through the fake client: model returns partial/null data, service does not throw.
+- Unit-test non-label image behavior through the fake client: model returns all fields as `null`, and service returns an all-null `ExtractedLabel` without throwing.
+- Unit-test malformed structured response: missing output, malformed JSON, extra keys, wrong types, and validation failure each return all-null `ExtractedLabel` without leaking raw model text.
+- Unit-test API timeout/client error: service handles timeout, rate-limit, network failure, and generic SDK error gracefully and returns all-null `ExtractedLabel`.
+- Unit-test no string parsing: fake response should be consumed from the structured output object only.
+- Unit-test mockability: `VisionService` can be constructed with a fake client/adapter, and tests assert no OpenAI SDK network method is called.
+- Unit-test env config: `VISION_MODEL` overrides the default model, and missing `OPENAI_API_KEY` produces a controlled startup/config error rather than a hardcoded fallback.
+
+## Assumptions
+
+- Phase 2 returns the existing `ExtractedLabel` shape exactly; no new fields like confidence, warnings, or raw OCR text are added yet.
+- Default model is `gpt-5.4-mini` for latency/cost under the project’s 5-second target, with `VISION_MODEL` allowing later tuning.
+- `detail: "high"` is chosen over `low` because the government warning must be copied exactly; preprocessing protects latency by bounding image size first.
+- Network/API integration tests are not required in Phase 2. Tests mock the OpenAI client and avoid real API calls.
+- Phase 3 must depend on the service interface or a callable extractor boundary, not directly on the OpenAI SDK, so endpoint tests can inject fake extraction results.

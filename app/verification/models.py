@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ApplicationData(BaseModel):
@@ -14,6 +14,8 @@ class ApplicationData(BaseModel):
 
 
 class ExtractedLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     brand_name: str | None = None
     product_class: str | None = None
     producer: str | None = None

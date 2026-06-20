@@ -2,8 +2,9 @@
 
 ## Current Status
 
-Phase 0 is complete and deployed. Phase 1 comparison engine is implemented locally and all tests
-pass.
+Phase 0 is complete and deployed. Phase 1 comparison engine is implemented. Phase 2 VisionService
+is implemented, mock-tested, and confirmed against a real sample image by the user. Phase 3 has not
+started.
 
 Live app:
 
@@ -196,7 +197,7 @@ app/static/styles.css
 tests/test_health.py
 ```
 
-`Docs/Plan.md` contains the Phase 0 plan and finalized Phase 1 plan.
+`Docs/Plan.md` contains the Phase 0 plan and finalized Phase 1 and Phase 2 plans.
 
 ## Phase 1 Comparison Engine
 
@@ -264,6 +265,101 @@ status = "PASS" if application == extracted else "FAIL"
 The Phase 1 work honored the no-network requirement. No new dependency was installed during
 execution; fuzzy matching is currently deterministic local standard-library logic.
 
+## Phase 2 VisionService
+
+Phase 2 adds the service layer for extracting structured label fields from one image. It introduces
+AI for extraction only; deterministic verification remains in the Phase 1 comparison engine.
+
+Files added:
+
+```text
+app/vision/__init__.py
+app/vision/client.py
+app/vision/fakes.py
+app/vision/preprocessing.py
+app/vision/service.py
+scripts/run_sample_extraction.py
+tests/test_vision_service.py
+```
+
+Files changed:
+
+```text
+.env.example
+.gitignore
+app/verification/models.py
+pyproject.toml
+uv.lock
+```
+
+Implemented behavior:
+
+- `VisionService.extract_label(...)` accepts image bytes and returns `ExtractedLabel`.
+- Images are preprocessed with Pillow: EXIF orientation correction, RGB conversion, long-edge
+  downscale, and JPEG re-encode.
+- OpenAI access is behind an injectable client adapter so tests can use fakes and Phase 3 endpoint
+  tests do not need real API calls.
+- Structured output uses the existing seven `ExtractedLabel` fields.
+- Defensive parsing returns an all-null `ExtractedLabel` for malformed output, missing output,
+  provider/client errors, timeouts, preprocessing failures, and non-label/null responses.
+- The extraction prompt emphasizes verbatim government-warning capture because downstream matching
+  is exact and case-sensitive.
+- `app/vision/fakes.py` provides `FakeVisionClient` for tests and future endpoint integration tests.
+
+Dependencies added:
+
+```text
+openai
+pillow
+```
+
+Environment variables:
+
+```text
+OPENAI_API_KEY
+VISION_MODEL
+```
+
+Secret status:
+
+- `OPENAI_API_KEY` is set in Railway.
+- No API key value is stored in the repo, docs, `.env.example`, tests, or committed config.
+- `.env` and `.env.*` remain ignored by git.
+
+Phase 2 verification command:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache UV_PYTHON_INSTALL_DIR=/tmp/uv-python uv run pytest
+```
+
+Latest result:
+
+```text
+68 passed in 0.45s
+```
+
+Sample extraction command:
+
+```bash
+uv run python scripts/run_sample_extraction.py
+```
+
+The script creates `samples/sample_label.jpg` if no path is provided. `samples/` is gitignored.
+
+Real sample status:
+
+- Initial local run without `OPENAI_API_KEY` failed safely with a controlled config message.
+- User later set a new OpenAI API key locally/Railway.
+- User confirmed sample image extraction is working and returns a populated `ExtractedLabel`.
+- A transient `RateLimitError` path was observed and correctly returned an all-null
+  `ExtractedLabel` instead of crashing.
+
+Railway variable command that works:
+
+```bash
+printf '%s' "$OPENAI_API_KEY" | npx -y @railway/cli variable set OPENAI_API_KEY --stdin
+```
+
 ## Important Decisions
 
 - One FastAPI service serves both the API and the static frontend.
@@ -310,10 +406,18 @@ To redeploy from the current directory:
 npx -y @railway/cli up --detach
 ```
 
+To run the Phase 2 sample extractor from a fresh clone:
+
+```bash
+export OPENAI_API_KEY="set-this-locally-only"
+uv run python scripts/run_sample_extraction.py
+```
+
 ## Next Phase Notes
 
-Phase 0 intentionally does not include upload, batch upload, TTB rules, OCR, vision model calls, or
-secret-bearing integrations.
+Phase 3 has not started. The likely next scope is an upload/verification API that connects image
+upload handling to `VisionService.extract_label()` and Phase 1 `verify_label()`, with endpoint
+tests injecting `FakeVisionClient` or a fake extraction service so tests do not hit OpenAI.
 
 Project rules still apply for the next phase:
 
