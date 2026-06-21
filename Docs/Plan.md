@@ -713,6 +713,15 @@ Review result: the earlier plan was close, but a few items needed tightening for
 ## Key UI Changes
 
 - Replace the health-check page with one task-focused form.
+- Use a two-card layout on desktop and tablet:
+  - Left white card: `Label photo`, large preview/placeholder area, and `Choose Label Photo`.
+  - Right white card: `Application Data`, all seven application fields, and inline extracted-result
+    boxes aligned with their matching inputs.
+- Put the primary `Check Label` button underneath the two cards, spanning the full content width.
+- Put the secondary `Check Another Label` button directly under the primary button with lower visual
+  emphasis.
+- On mobile and narrow screens, collapse to one column in this order: label photo card,
+  application data card, buttons, results.
 - Use plain labels:
   - `Label photo`
   - `Brand name`
@@ -727,6 +736,8 @@ Review result: the earlier plan was close, but a few items needed tightening for
 - Show the chosen image filename and preview immediately after selection.
 - Disable the button until all seven fields and an image are present, with plain text above it: `Add the missing items to check this label.`
 - Loading state says: `Checking the label. This may take a few seconds.`
+- Keep the backend field names unchanged: `image`, `brand_name`, `product_class`, `producer`,
+  `country_of_origin`, `abv`, `net_contents`, and `government_warning`.
 
 ## Results Layout
 
@@ -735,16 +746,23 @@ Review result: the earlier plan was close, but a few items needed tightening for
   - Orange/red `NEEDS REVIEW`
 - Under the verdict, show simple timing text:
   - `Checked in 4.2 seconds`
-- Show all seven field rows, but failures must be visually dominant:
-  - Failed rows appear first.
-  - Failed rows have a large `Needs review` badge.
-  - Passed rows have a smaller `Looks good` badge.
+- Show verification results inline beside each matching application field, not in a separate JSON or
+  dense results block.
+- Each row keeps the user's entered value visible in the input/select/textarea and shows the model's
+  extracted value in a read-only result box next to it.
+- Show all seven field rows, and make failures visually dominant:
+  - Failed rows/results have a large `Needs review` badge.
+  - Passed rows/results have a smaller `Looks good` badge.
+  - Approved result boxes turn rich green.
+  - Needs-review result boxes turn burnt orange.
 - Each failed row must show the reason immediately:
   - Field name: `Brand name`
-  - `Expected:` application value
-  - `Found on label:` extracted value, or `Not found on label`
+  - User-entered application value remains visible in the input/select/textarea.
+  - `Found on label:` extracted value, or `Not found on label`, appears in the inline result box.
   - Plain result message, such as `These do not match closely enough.`
 - No user should need to expand, click, inspect JSON, or scroll through dense data to find why the label needs review.
+- The separate extracted-label details area may be removed or de-emphasized, but the extracted value
+  for every field must remain visible inline beside the matching input.
 - Add a large secondary button: `Check Another Label`.
 
 ## Error Handling
@@ -781,6 +799,9 @@ Review result: the earlier plan was close, but a few items needed tightening for
   - `Alcohol percentage` -> `abv`
   - `Bottle size` -> `net_contents`
 - On success, render `verification.verdict`, `verification.fields`, `latency_ms`, and `extracted_label`.
+- Use `verification.fields` to apply pass/fail styling and status text to the inline result boxes.
+- Use `extracted_label` and each field result's `extracted_value` to populate the inline
+  `Found on label` values.
 - On error, render the backend `message` and `errors` as plain-English form errors.
 
 ## Test Plan
@@ -791,8 +812,14 @@ Review result: the earlier plan was close, but a few items needed tightening for
 - Loading state disables controls and uses plain text.
 - `PASS` response shows large `APPROVED`.
 - `NEEDS_REVIEW` response shows large `NEEDS REVIEW`.
-- Failed fields appear before passed fields.
-- Each failed field shows `Expected` and `Found on label` without requiring a click.
+- Desktop/tablet layout shows two white cards with the photo card on the left and the application
+  data/results card on the right.
+- The primary `Check Label` button is full-width underneath both cards.
+- Mobile layout stacks label photo, application data, buttons, and results with no overlap.
+- Each field shows the user-entered application value and the extracted `Found on label` value
+  inline without requiring a click.
+- Approved fields turn rich green and show `Looks good`.
+- Fields needing review turn burnt orange and show `Needs review`.
 - Null extracted values display `Not found on label`.
 - Server validation errors display plain English near the top and do not show technical details.
 - Network failure displays plain English.
@@ -804,7 +831,10 @@ Review result: the earlier plan was close, but a few items needed tightening for
 - Primary action is obvious after changing `Verify Label` to `Check Label` and making it the only primary button.
 - Jargon is reduced by changing `ABV`, `net contents`, `product class`, and `verification` language into everyday labels.
 - Errors are plain-English and actionable.
-- Failing-field reasons are immediately visible because failed rows are first and always show expected-vs-found.
+- Failing-field reasons are immediately visible because the extracted value appears inline beside
+  the user's input and the row/result box is colored burnt orange.
+- Approved fields are easy to scan because their inline result boxes turn rich green.
+- The revised two-card layout does not change `/verify`, response handling, or FormData field names.
 - Nothing important should require hunting, expanding, reading JSON, or interpreting backend terminology.
 
 ## Assumptions

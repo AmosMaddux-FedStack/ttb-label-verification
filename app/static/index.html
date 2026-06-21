@@ -34,22 +34,37 @@
           <section class="form-section data-section" aria-labelledby="data-title">
             <h2 id="data-title">Application Data</h2>
             <div class="field-stack">
-              <div class="field-row">
+              <div class="field-row" data-field-row="brand_name">
                 <label for="brand-name">Brand name</label>
                 <input id="brand-name" name="brand_name" autocomplete="organization" required>
+                <div class="inline-result pending" data-result-for="brand_name" aria-live="polite">
+                  <span class="result-status">Not checked</span>
+                  <span class="result-value">Found on label will appear here.</span>
+                  <span class="result-message"></span>
+                </div>
               </div>
 
-              <div class="field-row">
+              <div class="field-row" data-field-row="product_class">
                 <label for="product-class">Product type</label>
                 <input id="product-class" name="product_class" required>
+                <div class="inline-result pending" data-result-for="product_class" aria-live="polite">
+                  <span class="result-status">Not checked</span>
+                  <span class="result-value">Found on label will appear here.</span>
+                  <span class="result-message"></span>
+                </div>
               </div>
 
-              <div class="field-row">
+              <div class="field-row" data-field-row="producer">
                 <label for="producer">Producer or company</label>
                 <input id="producer" name="producer" required>
+                <div class="inline-result pending" data-result-for="producer" aria-live="polite">
+                  <span class="result-status">Not checked</span>
+                  <span class="result-value">Found on label will appear here.</span>
+                  <span class="result-message"></span>
+                </div>
               </div>
 
-              <div class="field-row">
+              <div class="field-row" data-field-row="country_of_origin">
                 <label for="country">Country</label>
                 <div class="stacked-control">
                   <select id="country" name="country_of_origin" required>
@@ -74,17 +89,27 @@
                   </select>
                   <input id="country-other" class="other-input" type="text" autocomplete="country-name" placeholder="Enter country" hidden>
                 </div>
+                <div class="inline-result pending" data-result-for="country_of_origin" aria-live="polite">
+                  <span class="result-status">Not checked</span>
+                  <span class="result-value">Found on label will appear here.</span>
+                  <span class="result-message"></span>
+                </div>
               </div>
 
-              <div class="field-row">
+              <div class="field-row" data-field-row="abv">
                 <label for="abv">Alcohol percentage</label>
                 <div class="suffix-control">
                   <input id="abv" name="abv" type="number" min="0" max="100" step="0.5" required>
                   <span>%</span>
                 </div>
+                <div class="inline-result pending" data-result-for="abv" aria-live="polite">
+                  <span class="result-status">Not checked</span>
+                  <span class="result-value">Found on label will appear here.</span>
+                  <span class="result-message"></span>
+                </div>
               </div>
 
-              <div class="field-row">
+              <div class="field-row" data-field-row="net_contents">
                 <label for="net-contents">Bottle size</label>
                 <select id="net-contents" name="net_contents" required>
                   <option value="">Choose size</option>
@@ -100,20 +125,31 @@
                   <option>1.5 L</option>
                   <option>1.75 L</option>
                 </select>
+                <div class="inline-result pending" data-result-for="net_contents" aria-live="polite">
+                  <span class="result-status">Not checked</span>
+                  <span class="result-value">Found on label will appear here.</span>
+                  <span class="result-message"></span>
+                </div>
               </div>
 
-              <div class="field-row warning-row">
+              <div class="field-row warning-row" data-field-row="government_warning">
                 <label for="government-warning">Government warning</label>
                 <textarea id="government-warning" name="government_warning" rows="6" required></textarea>
+                <div class="inline-result pending" data-result-for="government_warning" aria-live="polite">
+                  <span class="result-status">Not checked</span>
+                  <span class="result-value">Found on label will appear here.</span>
+                  <span class="result-message"></span>
+                </div>
               </div>
             </div>
 
-            <div class="actions">
-              <p id="form-status" class="form-status">Add the missing items to check this label.</p>
-              <button id="submit-button" type="submit" disabled>Check Label</button>
-              <button id="reset-button" type="button" class="secondary">Check Another Label</button>
-            </div>
           </section>
+        </div>
+
+        <div class="actions">
+          <p id="form-status" class="form-status">Add the missing items to check this label.</p>
+          <button id="submit-button" type="submit" disabled>Check Label</button>
+          <button id="reset-button" type="button" class="secondary">Check Another Label</button>
         </div>
       </form>
 
@@ -129,8 +165,6 @@
           </div>
         </div>
 
-        <div id="field-results" class="field-results"></div>
-
         <details class="extracted-details">
           <summary>Extracted label text</summary>
           <dl id="extracted-list"></dl>
@@ -138,6 +172,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=phase4-layout-20260621"></script>
+    <script src="/static/app.js?v=phase4-inline-20260621"></script>
   </body>
 </html>

@@ -103,7 +103,7 @@ h3 {
 
 .form-layout {
   display: grid;
-  grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.1fr);
+  grid-template-columns: minmax(300px, 0.8fr) minmax(620px, 1.2fr);
   gap: 22px;
   align-items: start;
 }
@@ -129,7 +129,7 @@ h3 {
 
 .field-row {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  grid-template-columns: 170px minmax(190px, 1fr) minmax(210px, 1fr);
   gap: 14px;
   align-items: center;
 }
@@ -165,6 +165,65 @@ select {
 textarea {
   min-height: 150px;
   resize: vertical;
+}
+
+.inline-result {
+  display: grid;
+  gap: 7px;
+  min-height: 66px;
+  align-content: center;
+  border: 2px solid #9facba;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  color: #263442;
+  overflow-wrap: anywhere;
+}
+
+.inline-result.approved {
+  border-color: #177245;
+  background: #e8f5ee;
+  color: #123f2a;
+}
+
+.inline-result.review {
+  border-color: #b45f06;
+  background: #fff1df;
+  color: #5f3200;
+}
+
+.warning-row .inline-result {
+  min-height: 150px;
+  align-content: start;
+}
+
+.result-status {
+  width: fit-content;
+  border-radius: 5px;
+  padding: 4px 8px;
+  background: #e8edf2;
+  color: #394655;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.inline-result.approved .result-status {
+  background: #177245;
+  color: #ffffff;
+}
+
+.inline-result.review .result-status {
+  background: #b45f06;
+  color: #ffffff;
+}
+
+.result-value {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.result-message {
+  font-size: 15px;
 }
 
 input:focus,
@@ -319,56 +378,6 @@ button.secondary {
   text-align: right;
 }
 
-.field-results {
-  display: grid;
-  gap: 14px;
-}
-
-.field-result {
-  border: 2px solid #c8d0d8;
-  border-radius: 8px;
-  padding: 18px;
-}
-
-.field-result.pass {
-  border-color: #65a987;
-}
-
-.field-result.fail {
-  border-color: #d88a6f;
-}
-
-.field-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.field-heading span {
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #e8f5ee;
-  color: #14633c;
-  font-weight: 700;
-}
-
-.field-result.fail .field-heading span {
-  background: #fff1df;
-  color: #8a4b00;
-}
-
-.comparison-values {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0;
-}
-
-.comparison-values div {
-  min-width: 0;
-}
-
 dt {
   color: #52606d;
   font-size: 15px;
@@ -420,14 +429,12 @@ summary {
   }
 
   .topbar,
-  .result-summary,
-  .field-heading {
+  .result-summary {
     align-items: stretch;
     flex-direction: column;
   }
 
   .field-row,
-  .comparison-values,
   .extracted-details dl {
     grid-template-columns: 1fr;
   }

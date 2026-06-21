@@ -3,7 +3,6 @@ const submitButton = document.querySelector("#submit-button");
 const resetButton = document.querySelector("#reset-button");
 const message = document.querySelector("#message");
 const resultPanel = document.querySelector("#result-panel");
-const fieldResults = document.querySelector("#field-results");
 const extractedList = document.querySelector("#extracted-list");
 const verdictBadge = document.querySelector("#verdict-badge");
 const latency = document.querySelector("#latency");
@@ -14,6 +13,7 @@ const imagePreview = document.querySelector("#image-preview");
 const formStatus = document.querySelector("#form-status");
 const countrySelect = document.querySelector("#country");
 const countryOther = document.querySelector("#country-other");
+const inlineResults = document.querySelectorAll("[data-result-for]");
 
 const fieldLabels = {
   brand_name: "Brand name",
@@ -46,51 +46,31 @@ async function checkHealth() {
 }
 
 function valueOrDash(value) {
-  return value === null || value === undefined || value === "" ? "Not found" : value;
+  return value === null || value === undefined || value === "" ? "Not found on label" : value;
+}
+
+function clearInlineResults() {
+  inlineResults.forEach((item) => {
+    item.className = "inline-result pending";
+    item.querySelector(".result-status").textContent = "Not checked";
+    item.querySelector(".result-value").textContent = "Found on label will appear here.";
+    item.querySelector(".result-message").textContent = "";
+  });
 }
 
 function renderFields(fields) {
-  fieldResults.innerHTML = "";
+  clearInlineResults();
 
-  const sortedFields = [...fields].sort((a, b) => {
-    if (a.status === b.status) {
-      return 0;
+  fields.forEach((field) => {
+    const item = document.querySelector(`[data-result-for="${field.field}"]`);
+    if (!item) {
+      return;
     }
-    return a.status === "FAIL" ? -1 : 1;
-  });
-
-  sortedFields.forEach((field) => {
-    const item = document.createElement("article");
-    item.className = `field-result ${field.status.toLowerCase()}`;
-
-    const heading = document.createElement("div");
-    heading.className = "field-heading";
-    heading.innerHTML = `
-      <h3>${fieldLabels[field.field] || field.field}</h3>
-      <span>${field.status === "PASS" ? "Looks good" : "Needs review"}</span>
-    `;
-
-    const values = document.createElement("dl");
-    values.className = "comparison-values";
-    values.innerHTML = `
-      <div>
-        <dt>Expected</dt>
-        <dd></dd>
-      </div>
-      <div>
-        <dt>Found on label</dt>
-        <dd></dd>
-      </div>
-    `;
-    values.querySelectorAll("dd")[0].textContent = valueOrDash(field.application_value);
-    values.querySelectorAll("dd")[1].textContent = valueOrDash(field.extracted_value);
-
-    const note = document.createElement("p");
-    note.className = "field-message";
-    note.textContent = field.message;
-
-    item.append(heading, values, note);
-    fieldResults.appendChild(item);
+    const approved = field.status === "PASS";
+    item.className = `inline-result ${approved ? "approved" : "review"}`;
+    item.querySelector(".result-status").textContent = approved ? "Looks good" : "Needs review";
+    item.querySelector(".result-value").textContent = valueOrDash(field.extracted_value);
+    item.querySelector(".result-message").textContent = field.message || "";
   });
 }
 
@@ -150,6 +130,7 @@ async function submitVerification(event) {
   }
   setMessage("", "info");
   resultPanel.hidden = true;
+  clearInlineResults();
   submitButton.disabled = true;
   submitButton.textContent = "Checking...";
   formStatus.textContent = "Checking the label. This may take a few seconds.";
@@ -186,6 +167,7 @@ function resetForm() {
   countryOther.hidden = true;
   countryOther.value = "";
   resultPanel.hidden = true;
+  clearInlineResults();
   setMessage("", "info");
   updateSubmitState();
 }
@@ -257,4 +239,5 @@ form.addEventListener("submit", submitVerification);
 form.addEventListener("input", updateSubmitState);
 resetButton.addEventListener("click", resetForm);
 checkHealth();
+clearInlineResults();
 updateSubmitState();
