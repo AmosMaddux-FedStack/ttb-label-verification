@@ -4,7 +4,7 @@
 
 Phase 0 is complete and deployed. Phase 1 comparison engine is implemented. Phase 2 VisionService
 is implemented, mock-tested, and confirmed against a real sample image by the user. Phase 3
-`POST /verify` is implemented and tested locally.
+`POST /verify` is implemented and tested locally. Phase 4 single-label frontend is implemented.
 
 Live app:
 
@@ -458,6 +458,45 @@ Deployment note:
 
 - Phase 3 has been tested locally but the public Railway app still needs redeploy after this commit
   before `/verify` is live on the Railway URL.
+
+## Phase 4 Single-Label Frontend
+
+Phase 4 replaces the Phase 0 health-check screen with a usable single-label verification page wired
+to same-origin `/verify`.
+
+Files changed:
+
+```text
+app/static/index.html
+app/static/app.js
+app/static/styles.css
+Docs/Progress_Report.md
+```
+
+Implemented behavior:
+
+- Image upload control for JPEG, PNG, and WebP.
+- Preview of selected label image.
+- Required application fields for brand name, product class, producer, country of origin, ABV, net
+  contents, and government warning.
+- Form submission sends `multipart/form-data` to `/verify`.
+- Successful responses render overall verdict, latency, all per-field results, expected-vs-found
+  values, and extracted label text.
+- Government warning extracted text is visible in field results and extracted-label details.
+- API errors render readable messages on the page.
+- Backend health badge still uses same-origin `/health`.
+
+Phase 4 verification command:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache UV_PYTHON_INSTALL_DIR=/tmp/uv-python uv run pytest
+```
+
+Latest local result:
+
+```text
+82 passed in 0.57s
+```
 
 ## Important Decisions
 

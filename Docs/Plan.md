@@ -700,3 +700,115 @@ Required non-500 cases:
 - The endpoint returns a response envelope containing the existing `VerificationResult` plus latency and extracted data, instead of modifying the Phase 1 pure comparison model.
 - `8 MB` is the initial upload cap to protect the 5-second budget; preprocessing still handles downscale/re-encode inside `VisionService`.
 - JPEG, PNG, and WebP cover Phase 3 browser uploads; HEIC is excluded until explicitly needed because server support is less predictable.
+
+
+# Final Phase 4 Plan: Single-Label UI For Clear Human Review
+
+## Summary
+
+Build a plain HTML/CSS/JS single-label screen where the primary action is unmistakable: upload one label image, enter the seven approved application values, press one large button, then see either `APPROVED` or `NEEDS REVIEW`.
+
+Review result: the earlier plan was close, but a few items needed tightening for the “70-year-old, no instructions, under 30 seconds” bar. The finalized UI removes jargon, makes failures visible without hunting, and keeps the next action obvious.
+
+## Key UI Changes
+
+- Replace the health-check page with one task-focused form.
+- Use plain labels:
+  - `Label photo`
+  - `Brand name`
+  - `Product type`
+  - `Producer or company`
+  - `Country`
+  - `Alcohol percentage`
+  - `Bottle size`
+  - `Government warning`
+- Use one large full-width primary button: `Check Label`.
+- Keep helper text minimal and action-oriented, not instructional paragraphs.
+- Show the chosen image filename and preview immediately after selection.
+- Disable the button until all seven fields and an image are present, with plain text above it: `Add the missing items to check this label.`
+- Loading state says: `Checking the label. This may take a few seconds.`
+
+## Results Layout
+
+- Verdict appears at the very top in a large banner:
+  - Green `APPROVED`
+  - Orange/red `NEEDS REVIEW`
+- Under the verdict, show simple timing text:
+  - `Checked in 4.2 seconds`
+- Show all seven field rows, but failures must be visually dominant:
+  - Failed rows appear first.
+  - Failed rows have a large `Needs review` badge.
+  - Passed rows have a smaller `Looks good` badge.
+- Each failed row must show the reason immediately:
+  - Field name: `Brand name`
+  - `Expected:` application value
+  - `Found on label:` extracted value, or `Not found on label`
+  - Plain result message, such as `These do not match closely enough.`
+- No user should need to expand, click, inspect JSON, or scroll through dense data to find why the label needs review.
+- Add a large secondary button: `Check Another Label`.
+
+## Error Handling
+
+- Show errors in a large high-contrast panel above the form.
+- Use plain English only:
+  - Unsupported file: `Please choose a JPG, PNG, or WebP photo.`
+  - File too large: `The photo is too large. Please choose one under 8 MB.`
+  - Missing field: `Please fill in Brand name.`
+  - Network failure: `The checking service is unavailable. Please try again.`
+  - Server failure: `Something went wrong while checking the label. Please try again.`
+- Never show stack traces, raw JSON, exception names, HTTP codes, or model/provider details to the user.
+- Put focus on the error panel after an error so screen readers and keyboard users land on the problem.
+
+## API Call
+
+- Submit with:
+  ```js
+  fetch("/verify", { method: "POST", body: formData })
+  ```
+- Multipart field names must match the backend:
+  - `image`
+  - `brand_name`
+  - `product_class`
+  - `producer`
+  - `country_of_origin`
+  - `abv`
+  - `net_contents`
+  - `government_warning`
+- Map user-facing labels to backend names:
+  - `Product type` -> `product_class`
+  - `Producer or company` -> `producer`
+  - `Country` -> `country_of_origin`
+  - `Alcohol percentage` -> `abv`
+  - `Bottle size` -> `net_contents`
+- On success, render `verification.verdict`, `verification.fields`, `latency_ms`, and `extracted_label`.
+- On error, render the backend `message` and `errors` as plain-English form errors.
+
+## Test Plan
+
+- Form renders one image picker, seven labeled fields, and one obvious `Check Label` button.
+- Button is disabled until image plus all seven fields are present.
+- Valid submit sends multipart form data with exact backend field names.
+- Loading state disables controls and uses plain text.
+- `PASS` response shows large `APPROVED`.
+- `NEEDS_REVIEW` response shows large `NEEDS REVIEW`.
+- Failed fields appear before passed fields.
+- Each failed field shows `Expected` and `Found on label` without requiring a click.
+- Null extracted values display `Not found on label`.
+- Server validation errors display plain English near the top and do not show technical details.
+- Network failure displays plain English.
+- `Check Another Label` resets the screen.
+- Mobile/narrow layout has no overlapping labels, buttons, or results.
+
+## Final Review Notes
+
+- Primary action is obvious after changing `Verify Label` to `Check Label` and making it the only primary button.
+- Jargon is reduced by changing `ABV`, `net contents`, `product class`, and `verification` language into everyday labels.
+- Errors are plain-English and actionable.
+- Failing-field reasons are immediately visible because failed rows are first and always show expected-vs-found.
+- Nothing important should require hunting, expanding, reading JSON, or interpreting backend terminology.
+
+## Assumptions
+
+- Phase 4 remains single-label only.
+- Batch upload is still required for the full project but belongs to a later phase.
+- Plain HTML/CSS/JS remains the frontend choice for speed and simplicity.

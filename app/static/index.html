@@ -8,22 +8,91 @@
   </head>
   <body>
     <main class="page">
-      <section class="status-panel" aria-labelledby="page-title">
-        <p class="eyebrow">Phase 0</p>
-        <h1 id="page-title">TTB Label Verification</h1>
-        <p class="lede">Deployment check</p>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">TTB Label Verification</p>
+          <h1>Single Label Check</h1>
+        </div>
+        <div id="health-badge" class="health-badge pending" role="status" aria-live="polite">
+          Checking backend
+        </div>
+      </header>
 
-        <div id="health-card" class="health-card pending" role="status" aria-live="polite">
-          <span class="status-dot" aria-hidden="true"></span>
+      <form id="verify-form" class="verify-form">
+        <section class="form-section" aria-labelledby="upload-title">
+          <h2 id="upload-title">Label photo</h2>
+          <label class="file-picker">
+            <span id="file-name">Choose label photo</span>
+            <input id="image" name="image" type="file" accept="image/jpeg,image/png,image/webp" required>
+          </label>
+          <img id="image-preview" class="image-preview" alt="">
+        </section>
+
+        <section class="form-section" aria-labelledby="data-title">
+          <h2 id="data-title">Application Data</h2>
+          <div class="field-grid">
+            <label>
+              Brand name
+              <input name="brand_name" autocomplete="organization" required>
+            </label>
+            <label>
+              Product type
+              <input name="product_class" required>
+            </label>
+            <label>
+              Producer or company
+              <input name="producer" required>
+            </label>
+            <label>
+              Country
+              <input name="country_of_origin" required>
+            </label>
+            <label>
+              Alcohol percentage
+              <input name="abv" required>
+            </label>
+            <label>
+              Bottle size
+              <input name="net_contents" required>
+            </label>
+          </div>
+
+          <label class="wide-field">
+            Government warning
+            <textarea name="government_warning" rows="5" required></textarea>
+          </label>
+        </section>
+
+        <div class="actions">
+          <p id="form-status" class="form-status">Add the missing items to check this label.</p>
+          <button id="submit-button" type="submit" disabled>Check Label</button>
+          <button id="reset-button" type="button" class="secondary">Check Another Label</button>
+        </div>
+      </form>
+
+      <section id="message" class="message" hidden tabindex="-1" aria-live="polite"></section>
+
+      <section id="result-panel" class="result-panel" hidden aria-labelledby="result-title">
+        <div class="result-summary">
           <div>
-            <p class="status-label">Checking backend</p>
-            <pre id="health-response">{}</pre>
+            <p class="eyebrow">Result</p>
+            <h2 id="result-title">Verification</h2>
+          </div>
+          <div>
+            <span id="verdict-badge" class="verdict-badge">Pending</span>
+            <p id="latency" class="latency"></p>
           </div>
         </div>
 
-        <button id="retry-button" type="button">Retry</button>
+        <div id="field-results" class="field-results"></div>
+
+        <details class="extracted-details">
+          <summary>Extracted label text</summary>
+          <dl id="extracted-list"></dl>
+        </details>
       </section>
     </main>
+
     <script src="/static/app.js"></script>
   </body>
 </html>
