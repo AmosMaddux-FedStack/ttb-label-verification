@@ -528,3 +528,175 @@ Rules:
 - `detail: "high"` is chosen over `low` because the government warning must be copied exactly; preprocessing protects latency by bounding image size first.
 - Network/API integration tests are not required in Phase 2. Tests mock the OpenAI client and avoid real API calls.
 - Phase 3 must depend on the service interface or a callable extractor boundary, not directly on the OpenAI SDK, so endpoint tests can inject fake extraction results.
+
+
+
+# Phase 3 Plan: `POST /verify` Multipart Verification Endpoint
+
+## Summary
+
+Add a FastAPI `POST /verify` endpoint that accepts one label image plus the seven required application fields as multipart form data. The endpoint orchestrates the existing flow:
+
+`validate request -> VisionService.extract_label -> verify_label -> return verification + latency`
+
+The endpoint will not add batch upload, UI changes, database state, or real feature expansion beyond a single-label API path.
+
+## Review Result
+
+Phase 3 is approved with the clarifications and test additions below.
+
+- Bad file type must return a clear `415` JSON error, never a `500`.
+- Empty submissions, including an empty multipart body or a request with no file and no usable form fields, must return a clear `400` JSON error, never a `500`.
+- The success response must include:
+  - Per-field `verification.fields`.
+  - Expected-vs-found values on failures through each `FieldResult.application_value` and `FieldResult.extracted_value`.
+  - Overall `verification.verdict`.
+  - Endpoint `latency_ms`.
+  - `extracted_label`, including `government_warning`, so the warning text read by the model is surfaced.
+- The 5-second single-label budget must be measured for every `/verify` request and logged with the verdict. Requests over `5000 ms` must produce a warning log.
+- Tests must cover each of those behaviors using a mocked vision service, with no OpenAI API calls.
+
+## API Contract
+
+Request: `multipart/form-data`
+
+- `image`: required file upload.
+- Required form fields:
+  - `brand_name`
+  - `product_class`
+  - `producer`
+  - `country_of_origin`
+  - `abv`
+  - `net_contents`
+  - `government_warning`
+
+Validation:
+
+- File is required.
+- Allowed content types: `image/jpeg`, `image/png`, `image/webp`.
+- Maximum upload size: `8 MB`.
+- All seven application fields are required and must be non-empty after trimming.
+- Unknown extra form fields are ignored for Phase 3.
+- Empty multipart submissions return `400` with a human-readable message listing the missing image
+  and required fields where possible.
+- Invalid requests return human-readable JSON errors, never stack traces.
+
+Response model:
+
+- Add endpoint response model `VerifyResponse` rather than changing the pure Phase 1 `VerificationResult`.
+- Shape:
+  ```json
+  {
+    "verification": {
+      "verdict": "PASS",
+      "fields": []
+    },
+    "latency_ms": 1234,
+    "extracted_label": {
+      "brand_name": null,
+      "product_class": null,
+      "producer": null,
+      "country_of_origin": null,
+      "abv": null,
+      "net_contents": null,
+      "government_warning": null
+    }
+  }
+  ```
+- `verification` is the existing `VerificationResult`.
+- `verification.fields` must be returned in full. Each failed field includes the expected value in
+  `application_value` and the found value in `extracted_value`.
+- `latency_ms` is measured around the full endpoint orchestration after basic request parsing starts.
+- `extracted_label` is included so users can see what the model read when a field fails.
+- `extracted_label.government_warning` must be included exactly as extracted, including on warning
+  failures, so users can inspect the warning text used by the exact-match comparator.
+
+Error shape:
+
+```json
+{
+  "message": "Please upload a JPEG, PNG, or WebP image.",
+  "errors": {
+    "image": "Unsupported file type."
+  }
+}
+```
+
+Status codes:
+
+- `400`: missing/empty application fields or missing image.
+- `413`: file too large.
+- `415`: unsupported file type.
+- `500`: unexpected internal failure, with generic message only.
+
+Required non-500 cases:
+
+- Missing image -> `400`.
+- Empty multipart request -> `400`.
+- Required field present but blank after trimming -> `400`.
+- Unsupported uploaded file type -> `415`.
+- Oversized upload -> `413`.
+
+## Implementation Changes
+
+- Add `python-multipart` dependency for FastAPI form uploads.
+- Add API models in a small request/response module, likely `app/api/models.py`, for `VerifyResponse` and `ErrorResponse`.
+- Add a dependency provider, likely `get_vision_service()`, so tests can override `VisionService` cleanly.
+- Add `POST /verify` in `app/main.py` or a small router module.
+- Construct `ApplicationData` from validated form fields.
+- Read the image bytes once, enforce size, then pass bytes to `VisionService.extract_label`.
+- Pass returned `ExtractedLabel` and `ApplicationData` into `verify_label`.
+- Use `time.perf_counter()` for latency measurement and return integer milliseconds.
+- Log one structured summary line per `/verify` request with `latency_ms`, `verdict`, field failure
+  count, upload content type, upload size, and whether the request exceeded the `5000 ms` budget.
+- Log at warning level when `latency_ms > 5000`; otherwise log at info level.
+- Wrap unexpected exceptions with logging and a generic user-facing error.
+
+## Orchestration Details
+
+- Request validation happens before model extraction to avoid spending API time on invalid inputs.
+- Latency measurement starts before validation work that is part of endpoint handling and stops
+  immediately before returning the response or error.
+- `VisionService` already handles blurry, invalid, or provider-failed extraction by returning null fields, so `/verify` should still compare and return `NEEDS_REVIEW` when extraction is partial.
+- If `VisionService.extract_label` itself raises unexpectedly, catch it at the endpoint boundary and return a generic `500` error.
+- Government warning remains exact/case-sensitive because `/verify` delegates comparison to the existing Phase 1 `verify_label`.
+- Government warning extracted text is surfaced twice on failures: in `extracted_label.government_warning`
+  and in the `government_warning` `FieldResult.extracted_value`.
+
+## Endpoint Tests With Mocked VisionService
+
+- Successful request with valid JPEG and all application fields returns `200`.
+- Successful response includes `verification`, `latency_ms`, and `extracted_label`.
+- Successful response includes `verification.verdict`.
+- Successful response includes one `verification.fields` entry per compared field.
+- Failed field response includes expected-vs-found values via `application_value` and `extracted_value`.
+- All matching mocked extracted fields returns `verdict == "PASS"`.
+- One mismatched mocked field returns `verdict == "NEEDS_REVIEW"`.
+- Partial mocked extraction with null fields returns `NEEDS_REVIEW`, not an exception.
+- Mocked blurry/glare case returns partial data and still returns `200`.
+- Missing image returns `400` with human-readable error.
+- Empty multipart submission returns `400` with human-readable error.
+- Unsupported content type returns `415`.
+- Unsupported content type does not call mocked `VisionService`.
+- Oversized image returns `413`.
+- Missing required application field returns `400`.
+- Empty required application field returns `400`.
+- Government warning case mismatch returns `NEEDS_REVIEW`.
+- Government warning mismatch response includes the extracted warning text in
+  `extracted_label.government_warning`.
+- Government warning mismatch response includes the extracted warning text in the
+  `government_warning` field result's `extracted_value`.
+- Mocked VisionService exception returns generic `500` with no stack trace.
+- Response latency is present, numeric, and non-negative.
+- Latency measurement is logged for successful and 4xx responses.
+- Slow mocked VisionService path over `5000 ms` logs a warning that the request exceeded the
+  single-label budget.
+- Normal mocked VisionService path under `5000 ms` logs an info-level summary.
+- Test override confirms the endpoint uses the mocked VisionService and makes no real OpenAI call.
+
+## Assumptions
+
+- Phase 3 is single-image `/verify` only; batch upload remains required for the overall project but is not implemented in this phase.
+- The endpoint returns a response envelope containing the existing `VerificationResult` plus latency and extracted data, instead of modifying the Phase 1 pure comparison model.
+- `8 MB` is the initial upload cap to protect the 5-second budget; preprocessing still handles downscale/re-encode inside `VisionService`.
+- JPEG, PNG, and WebP cover Phase 3 browser uploads; HEIC is excluded until explicitly needed because server support is less predictable.

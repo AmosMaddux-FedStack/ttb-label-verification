@@ -3,8 +3,8 @@
 ## Current Status
 
 Phase 0 is complete and deployed. Phase 1 comparison engine is implemented. Phase 2 VisionService
-is implemented, mock-tested, and confirmed against a real sample image by the user. Phase 3 has not
-started.
+is implemented, mock-tested, and confirmed against a real sample image by the user. Phase 3
+`POST /verify` is implemented and tested locally.
 
 Live app:
 
@@ -197,7 +197,7 @@ app/static/styles.css
 tests/test_health.py
 ```
 
-`Docs/Plan.md` contains the Phase 0 plan and finalized Phase 1 and Phase 2 plans.
+`Docs/Plan.md` contains the Phase 0 plan and finalized Phase 1, Phase 2, and Phase 3 plans.
 
 ## Phase 1 Comparison Engine
 
@@ -360,6 +360,105 @@ Railway variable command that works:
 printf '%s' "$OPENAI_API_KEY" | npx -y @railway/cli variable set OPENAI_API_KEY --stdin
 ```
 
+## Phase 3 Verification Endpoint
+
+Phase 3 adds a single-image multipart `POST /verify` API endpoint. It validates request input,
+extracts label data through `VisionService`, compares with the Phase 1 deterministic verifier, and
+returns verification results plus latency.
+
+Files added:
+
+```text
+app/api/__init__.py
+app/api/models.py
+app/api/verify.py
+tests/test_verify_endpoint.py
+```
+
+Files changed:
+
+```text
+app/main.py
+pyproject.toml
+uv.lock
+Docs/Plan.md
+```
+
+Dependency added:
+
+```text
+python-multipart
+```
+
+Implemented behavior:
+
+- `POST /verify` accepts multipart `image` plus seven required application fields.
+- Valid image content types: `image/jpeg`, `image/png`, `image/webp`.
+- Upload size cap: `8 MB`.
+- Missing image and missing/blank fields return readable `400` JSON errors.
+- Bad file type returns readable `415` JSON error.
+- Oversized file returns readable `413` JSON error.
+- Response includes `verification`, `verification.verdict`, all per-field results,
+  `latency_ms`, and `extracted_label`.
+- Failed fields include expected-vs-found values through `application_value` and
+  `extracted_value`.
+- Government warning extracted text is surfaced in both `extracted_label.government_warning` and
+  the `government_warning` field result's `extracted_value`.
+- Latency is measured for each request and logged.
+- Requests over `5000 ms` produce warning-level logs for the single-label budget.
+- Endpoint tests use mocked vision service and do not call OpenAI.
+
+Phase 3 verification command:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache UV_PYTHON_INSTALL_DIR=/tmp/uv-python uv run pytest
+```
+
+Latest result:
+
+```text
+82 passed in 0.47s
+```
+
+Local HTTP success check:
+
+- Ran local FastAPI server with Railway environment variables via `railway run`.
+- Posted `samples/sample_label.jpg` to `/verify`.
+- Response status: `200`.
+- Response included full `VerificationResult`, all seven field results, `latency_ms`, and
+  `extracted_label`.
+- Observed `latency_ms`: `3249`.
+- Observed verdict: `NEEDS_REVIEW`.
+- Reason: government warning failed exact comparison because the model extracted line breaks in the
+  warning text. This is correct strict behavior.
+
+Invalid input checks:
+
+Bad file type:
+
+```json
+{"message":"Please provide an image and all required label fields.","errors":{"image":"Unsupported file type."}}
+```
+
+```text
+HTTP_STATUS:415
+```
+
+Empty submission:
+
+```json
+{"message":"Please provide an image and all required label fields.","errors":{"image":"Image file is required.","brand_name":"This field is required.","product_class":"This field is required.","producer":"This field is required.","country_of_origin":"This field is required.","abv":"This field is required.","net_contents":"This field is required.","government_warning":"This field is required."}}
+```
+
+```text
+HTTP_STATUS:400
+```
+
+Deployment note:
+
+- Phase 3 has been tested locally but the public Railway app still needs redeploy after this commit
+  before `/verify` is live on the Railway URL.
+
 ## Important Decisions
 
 - One FastAPI service serves both the API and the static frontend.
@@ -415,9 +514,8 @@ uv run python scripts/run_sample_extraction.py
 
 ## Next Phase Notes
 
-Phase 3 has not started. The likely next scope is an upload/verification API that connects image
-upload handling to `VisionService.extract_label()` and Phase 1 `verify_label()`, with endpoint
-tests injecting `FakeVisionClient` or a fake extraction service so tests do not hit OpenAI.
+Phase 4 has not started. The likely next scope is frontend integration for single-image verification
+or the required batch-upload workflow, depending on the approved plan.
 
 Project rules still apply for the next phase:
 

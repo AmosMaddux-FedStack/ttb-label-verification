@@ -4,11 +4,14 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.verify import router as verify_router
+
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="TTB Label Verification POC")
+app.include_router(verify_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
