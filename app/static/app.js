@@ -12,6 +12,8 @@ const imageInput = document.querySelector("#image");
 const fileName = document.querySelector("#file-name");
 const imagePreview = document.querySelector("#image-preview");
 const formStatus = document.querySelector("#form-status");
+const countrySelect = document.querySelector("#country");
+const countryOther = document.querySelector("#country-other");
 
 const fieldLabels = {
   brand_name: "Brand name",
@@ -153,9 +155,10 @@ async function submitVerification(event) {
   formStatus.textContent = "Checking the label. This may take a few seconds.";
 
   try {
+    const formData = buildFormData();
     const response = await fetch("/verify", {
       method: "POST",
-      body: new FormData(form),
+      body: formData,
     });
     const body = await response.json();
 
@@ -180,9 +183,28 @@ function resetForm() {
   fileName.textContent = "Choose label photo";
   imagePreview.removeAttribute("src");
   imagePreview.classList.remove("visible");
+  countryOther.hidden = true;
+  countryOther.value = "";
   resultPanel.hidden = true;
   setMessage("", "info");
   updateSubmitState();
+}
+
+function selectedCountryValue() {
+  if (countrySelect.value === "__other__") {
+    return countryOther.value.trim();
+  }
+  return countrySelect.value.trim();
+}
+
+function buildFormData() {
+  const formData = new FormData(form);
+  formData.set("country_of_origin", selectedCountryValue());
+  const abv = String(formData.get("abv") || "").trim();
+  if (abv) {
+    formData.set("abv", `${abv}%`);
+  }
+  return formData;
 }
 
 function isFormComplete() {
@@ -190,7 +212,12 @@ function isFormComplete() {
   if (!imageInput.files.length) {
     return false;
   }
-  return Object.keys(fieldLabels).every((name) => String(formData.get(name) || "").trim());
+  return Object.keys(fieldLabels).every((name) => {
+    if (name === "country_of_origin") {
+      return selectedCountryValue();
+    }
+    return String(formData.get(name) || "").trim();
+  });
 }
 
 function updateSubmitState() {
@@ -212,6 +239,17 @@ imageInput.addEventListener("change", () => {
   fileName.textContent = file.name;
   imagePreview.src = URL.createObjectURL(file);
   imagePreview.classList.add("visible");
+  updateSubmitState();
+});
+
+countrySelect.addEventListener("change", () => {
+  const showOther = countrySelect.value === "__other__";
+  countryOther.hidden = !showOther;
+  if (showOther) {
+    countryOther.focus();
+  } else {
+    countryOther.value = "";
+  }
   updateSubmitState();
 });
 

@@ -18,59 +18,104 @@
         </div>
       </header>
 
+      <section id="message" class="message" hidden tabindex="-1" aria-live="polite"></section>
+
       <form id="verify-form" class="verify-form">
-        <section class="form-section" aria-labelledby="upload-title">
-          <h2 id="upload-title">Label photo</h2>
-          <label class="file-picker">
-            <span id="file-name">Choose label photo</span>
-            <input id="image" name="image" type="file" accept="image/jpeg,image/png,image/webp" required>
-          </label>
-          <img id="image-preview" class="image-preview" alt="">
-        </section>
+        <div class="form-layout">
+          <section class="form-section photo-section" aria-labelledby="upload-title">
+            <h2 id="upload-title">Label photo</h2>
+            <label class="file-picker">
+              <span id="file-name">Choose label photo</span>
+              <input id="image" name="image" type="file" accept="image/jpeg,image/png,image/webp" required>
+            </label>
+            <img id="image-preview" class="image-preview" alt="">
+          </section>
 
-        <section class="form-section" aria-labelledby="data-title">
-          <h2 id="data-title">Application Data</h2>
-          <div class="field-grid">
-            <label>
-              Brand name
-              <input name="brand_name" autocomplete="organization" required>
-            </label>
-            <label>
-              Product type
-              <input name="product_class" required>
-            </label>
-            <label>
-              Producer or company
-              <input name="producer" required>
-            </label>
-            <label>
-              Country
-              <input name="country_of_origin" required>
-            </label>
-            <label>
-              Alcohol percentage
-              <input name="abv" required>
-            </label>
-            <label>
-              Bottle size
-              <input name="net_contents" required>
-            </label>
-          </div>
+          <section class="form-section data-section" aria-labelledby="data-title">
+            <h2 id="data-title">Application Data</h2>
+            <div class="field-stack">
+              <div class="field-row">
+                <label for="brand-name">Brand name</label>
+                <input id="brand-name" name="brand_name" autocomplete="organization" required>
+              </div>
 
-          <label class="wide-field">
-            Government warning
-            <textarea name="government_warning" rows="5" required></textarea>
-          </label>
-        </section>
+              <div class="field-row">
+                <label for="product-class">Product type</label>
+                <input id="product-class" name="product_class" required>
+              </div>
 
-        <div class="actions">
-          <p id="form-status" class="form-status">Add the missing items to check this label.</p>
-          <button id="submit-button" type="submit" disabled>Check Label</button>
-          <button id="reset-button" type="button" class="secondary">Check Another Label</button>
+              <div class="field-row">
+                <label for="producer">Producer or company</label>
+                <input id="producer" name="producer" required>
+              </div>
+
+              <div class="field-row">
+                <label for="country">Country</label>
+                <div class="stacked-control">
+                  <select id="country" name="country_of_origin" required>
+                    <option value="">Choose country</option>
+                    <option>United States</option>
+                    <option>Argentina</option>
+                    <option>Australia</option>
+                    <option>Austria</option>
+                    <option>Canada</option>
+                    <option>Chile</option>
+                    <option>France</option>
+                    <option>Germany</option>
+                    <option>Italy</option>
+                    <option>Japan</option>
+                    <option>Mexico</option>
+                    <option>New Zealand</option>
+                    <option>Portugal</option>
+                    <option>South Africa</option>
+                    <option>Spain</option>
+                    <option>United Kingdom</option>
+                    <option value="__other__">Other</option>
+                  </select>
+                  <input id="country-other" class="other-input" type="text" autocomplete="country-name" placeholder="Enter country" hidden>
+                </div>
+              </div>
+
+              <div class="field-row">
+                <label for="abv">Alcohol percentage</label>
+                <div class="suffix-control">
+                  <input id="abv" name="abv" type="number" min="0" max="100" step="0.5" required>
+                  <span>%</span>
+                </div>
+              </div>
+
+              <div class="field-row">
+                <label for="net-contents">Bottle size</label>
+                <select id="net-contents" name="net_contents" required>
+                  <option value="">Choose size</option>
+                  <option>50 ml</option>
+                  <option>100 ml</option>
+                  <option>187.5 ml</option>
+                  <option>200 ml</option>
+                  <option>375 ml</option>
+                  <option>500 ml</option>
+                  <option>700 ml</option>
+                  <option>750 ml</option>
+                  <option>1 L</option>
+                  <option>1.5 L</option>
+                  <option>1.75 L</option>
+                </select>
+              </div>
+
+              <div class="field-row warning-row">
+                <label for="government-warning">Government warning</label>
+                <textarea id="government-warning" name="government_warning" rows="6" required></textarea>
+              </div>
+            </div>
+
+            <div class="actions">
+              <p id="form-status" class="form-status">Add the missing items to check this label.</p>
+              <button id="submit-button" type="submit" disabled>Check Label</button>
+              <button id="reset-button" type="button" class="secondary">Check Another Label</button>
+            </div>
+          </section>
         </div>
       </form>
-
-      <section id="message" class="message" hidden tabindex="-1" aria-live="polite"></section>
 
       <section id="result-panel" class="result-panel" hidden aria-labelledby="result-title">
         <div class="result-summary">
@@ -93,6 +138,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=phase4-20260621"></script>
+    <script src="/static/app.js?v=phase4-layout-20260621"></script>
   </body>
 </html>
