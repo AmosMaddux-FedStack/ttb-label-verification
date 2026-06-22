@@ -261,6 +261,81 @@ async def test_warning_whitespace_only_difference_passes_and_preserves_original(
 
 
 @pytest.mark.anyio
+async def test_barefoot_style_cleaned_extraction_returns_pass() -> None:
+    warning_with_newline = CANONICAL_WARNING.replace(
+        "GOVERNMENT WARNING:",
+        "GOVERNMENT WARNING:\n",
+    )
+    mock = MockVisionService(
+        extracted=ExtractedLabel(
+            brand_name="BAREFOOT",
+            product_class="PINK MOSCATO",
+            producer="VINTED & BOTTLED BY BAREFOOT WINES, MODESTO, CALIFORNIA",
+            country_of_origin="CALIFORNIA",
+            abv="14.5%",
+            net_contents="750 mL",
+            government_warning=warning_with_newline,
+        )
+    )
+
+    response = await call_verify(
+        mock,
+        data=form_data(
+            brand_name="BAREFOOT",
+            product_class="PINK MOSCATO",
+            producer="BAREFOOT WINES",
+            country_of_origin="USA",
+            abv="14.5%",
+            net_contents="750mL",
+            government_warning=CANONICAL_WARNING,
+        ),
+        image=upload_file(),
+    )
+
+    assert response_status(response) == 200
+    assert response_body(response)["verification"]["verdict"] == "PASS"
+
+
+@pytest.mark.anyio
+async def test_barefoot_style_bad_abv_returns_needs_review() -> None:
+    warning_with_newline = CANONICAL_WARNING.replace(
+        "GOVERNMENT WARNING:",
+        "GOVERNMENT WARNING:\n",
+    )
+    mock = MockVisionService(
+        extracted=ExtractedLabel(
+            brand_name="BAREFOOT",
+            product_class="PINK MOSCATO",
+            producer="VINTED & BOTTLED BY BAREFOOT WINES, MODESTO, CALIFORNIA",
+            country_of_origin="CALIFORNIA",
+            abv="IA 5c, ME 15%",
+            net_contents="750 mL",
+            government_warning=warning_with_newline,
+        )
+    )
+
+    response = await call_verify(
+        mock,
+        data=form_data(
+            brand_name="BAREFOOT",
+            product_class="PINK MOSCATO",
+            producer="BAREFOOT WINES",
+            country_of_origin="USA",
+            abv="14.5%",
+            net_contents="750mL",
+            government_warning=CANONICAL_WARNING,
+        ),
+        image=upload_file(),
+    )
+    body = response_body(response)
+    abv_result = next(field for field in body["verification"]["fields"] if field["field"] == "abv")
+
+    assert response_status(response) == 200
+    assert body["verification"]["verdict"] == "NEEDS_REVIEW"
+    assert abv_result["status"] == "FAIL"
+
+
+@pytest.mark.anyio
 async def test_partial_extraction_returns_needs_review_not_exception() -> None:
     mock = MockVisionService(extracted=matching_extracted_label(producer=None, abv=None))
 

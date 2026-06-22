@@ -45,8 +45,8 @@ for wording, punctuation, and capitalization, while tolerating whitespace-only O
 | --- | --- |
 | Brand name | Fuzzy token-sort match |
 | Product type | Fuzzy token-sort match |
-| Producer or company | Fuzzy token-sort match |
-| Country | Exact match after country synonym normalization |
+| Producer or company | Fuzzy token-sort match after role/location cleanup |
+| Country | Exact match after country, state, province, and wine-region normalization |
 | Alcohol percentage | Numeric ABV normalization with tolerance |
 | Bottle size | Unit normalization to milliliters with tolerance |
 | Government warning | Case-sensitive exact match after whitespace collapse |
@@ -54,6 +54,12 @@ for wording, punctuation, and capitalization, while tolerating whitespace-only O
 Whitespace-only OCR differences such as line breaks, tabs, repeated spaces, or leading/trailing
 spaces are tolerated for the government warning. Capitalization, punctuation, colon, spelling, and
 wording must still match.
+
+Country matching normalizes common wine regions and subdivisions to their countries, such as
+`California` to `United States`, `Mendoza` to `Argentina`, and `Bordeaux` to `France`. Producer
+matching ignores common role phrases and trailing locations, such as `VINTED & BOTTLED BY ...,
+MODESTO, CALIFORNIA`, while still rejecting unrelated company names. ABV matching prefers numbers
+attached to alcohol wording and does not loosen tolerance to hide bad OCR.
 
 Verdict rule:
 
@@ -296,3 +302,22 @@ git log --all -G 'sk-[A-Za-z0-9_-]+|sk-proj-[A-Za-z0-9_-]+|OPENAI_API_KEY\s*=.+|
 ```
 
 For a stronger public-release audit, run a dedicated scanner such as `gitleaks` or `trufflehog`.
+
+## TODO
+
+We are currently tightening the real-label extraction and verification behavior so the proof of
+concept handles common wine labels consistently across brands, regions, and countries instead of
+only passing curated examples.
+
+- Continue improving the vision prompt so `country_of_origin` is returned as a country-level value,
+  producer values contain only the business/entity name, and ABV values ignore unrelated OCR noise.
+- Keep expanding country, state, province, and wine-region normalization for common wine-exporting
+  countries so labels that show places like California, Mendoza, Bordeaux, Rioja, Marlborough, or
+  Western Cape compare against their countries correctly.
+- Preserve strict government-warning wording checks while allowing harmless whitespace and line-break
+  differences from OCR extraction.
+- Add more real-label regression fixtures beyond the current Barefoot-style cases, especially for
+  imported wines, multi-label batches, glare/cropping, and labels with several producer/importer
+  statements.
+- Re-run full backend and frontend tests after each extraction or comparison change, then verify the
+  deployed demo against representative real bottle photos.

@@ -20,6 +20,22 @@ CANONICAL_WARNING = (
     "operate machinery, and may cause health problems."
 )
 
+BAREFOOT_WARNING = (
+    "GOVERNMENT WARNING: (1) ACCORDING TO THE SURGEON GENERAL, WOMEN SHOULD NOT DRINK "
+    "ALCOHOLIC BEVERAGES DURING PREGNANCY BECAUSE OF THE RISK OF BIRTH DEFECTS. "
+    "(2) CONSUMPTION OF ALCOHOLIC BEVERAGES IMPAIRS YOUR ABILITY TO DRIVE A CAR OR "
+    "OPERATE MACHINERY, AND MAY CAUSE HEALTH PROBLEMS."
+)
+
+BAREFOOT_WARNING_WITH_LINE_BREAKS = (
+    "GOVERNMENT WARNING: (1) ACCORDING TO THE SURGEON\n"
+    "GENERAL, WOMEN SHOULD NOT DRINK ALCOHOLIC\n"
+    "BEVERAGES DURING PREGNANCY BECAUSE OF THE RISK OF\n"
+    "BIRTH DEFECTS. (2) CONSUMPTION OF ALCOHOLIC BEVERAGES\n"
+    "IMPAIRS YOUR ABILITY TO DRIVE A CAR OR OPERATE\n"
+    "MACHINERY, AND MAY CAUSE HEALTH PROBLEMS."
+)
+
 
 def make_application(**overrides: str) -> ApplicationData:
     values = {
@@ -127,6 +143,34 @@ def test_producer_punctuation_variation_passes() -> None:
     assert result.status == "PASS"
 
 
+def test_producer_role_and_location_variation_passes() -> None:
+    result = compare_producer(
+        "BAREFOOT WINES",
+        "VINTED & BOTTLED BY BAREFOOT WINES, MODESTO, CALIFORNIA",
+    )
+
+    assert result.status == "PASS"
+    assert result.normalized_extracted_value == "barefoot wines"
+
+
+def test_producer_produced_by_location_variation_passes() -> None:
+    result = compare_producer("Acme Winery LLC", "PRODUCED BY ACME WINERY, NAPA, CALIFORNIA")
+
+    assert result.status == "PASS"
+
+
+def test_producer_non_us_location_variation_passes() -> None:
+    result = compare_producer("Santa Rita", "BOTTLED BY SANTA RITA, SANTIAGO, CHILE")
+
+    assert result.status == "PASS"
+
+
+def test_producer_location_only_extracted_value_fails() -> None:
+    result = compare_producer("BAREFOOT WINES", "MODESTO, CALIFORNIA")
+
+    assert result.status == "FAIL"
+
+
 def test_producer_unrelated_name_fails() -> None:
     result = compare_producer("Acme Winery LLC", "Different Cellars")
 
@@ -152,6 +196,41 @@ def test_country_usa_matches_united_states() -> None:
 
 def test_country_usa_dotted_matches_united_states_of_america() -> None:
     result = compare_country_of_origin("U.S.A.", "United States of America")
+
+    assert result.status == "PASS"
+
+
+@pytest.mark.parametrize(
+    ("application", "extracted"),
+    [
+        ("USA", "California"),
+        ("United States", "CALIFORNIA"),
+        ("USA", "Modesto, California"),
+        ("United States", "Napa Valley"),
+        ("USA", "Sonoma County"),
+        ("Canada", "Ontario"),
+        ("Canada", "British Columbia"),
+        ("Argentina", "Mendoza"),
+        ("France", "Bordeaux"),
+        ("France", "Burgundy"),
+        ("Italy", "Tuscany"),
+        ("Italy", "Piedmont"),
+        ("Spain", "Rioja"),
+        ("Spain", "Priorat"),
+        ("Portugal", "Douro"),
+        ("Germany", "Mosel"),
+        ("Austria", "Wachau"),
+        ("New Zealand", "Marlborough"),
+        ("Australia", "Barossa Valley"),
+        ("South Africa", "Western Cape"),
+        ("Chile", "Maipo"),
+    ],
+)
+def test_country_regions_and_subdivisions_match_country(
+    application: str,
+    extracted: str,
+) -> None:
+    result = compare_country_of_origin(application, extracted)
 
     assert result.status == "PASS"
 
@@ -184,6 +263,26 @@ def test_missing_extracted_country_fails() -> None:
 
 def test_abv_percent_matches_alc_vol() -> None:
     result = compare_abv("13.5%", "13.5 % alc/vol")
+
+    assert result.status == "PASS"
+
+
+def test_abv_with_alcohol_context_after_garbage_prefix_passes() -> None:
+    result = compare_abv("14.5%", "IA 5c, 14.5% ALC/VOL")
+
+    assert result.status == "PASS"
+    assert result.normalized_extracted_value == "14.5"
+
+
+def test_abv_bad_ocr_percent_does_not_get_loosened_to_pass() -> None:
+    result = compare_abv("14.5%", "IA 5c, ME 15%")
+
+    assert result.status == "FAIL"
+    assert result.normalized_extracted_value == "15.0"
+
+
+def test_abv_labeled_before_number_matches() -> None:
+    result = compare_abv("14.5%", "ALC. 14.5% BY VOL")
 
     assert result.status == "PASS"
 
@@ -428,3 +527,56 @@ def test_failed_government_warning_result_includes_exact_extracted_warning_text(
 
     assert warning_result.status == "FAIL"
     assert warning_result.extracted_value == extracted_warning
+
+
+def test_barefoot_cleaned_extraction_passes_all_fields() -> None:
+    application = ApplicationData(
+        brand_name="BAREFOOT",
+        product_class="PINK MOSCATO",
+        producer="BAREFOOT WINES",
+        country_of_origin="USA",
+        abv="14.5%",
+        net_contents="750mL",
+        government_warning=BAREFOOT_WARNING,
+    )
+    extracted = ExtractedLabel(
+        brand_name="BAREFOOT",
+        product_class="PINK MOSCATO",
+        producer="VINTED & BOTTLED BY BAREFOOT WINES, MODESTO, CALIFORNIA",
+        country_of_origin="CALIFORNIA",
+        abv="14.5%",
+        net_contents="750 mL",
+        government_warning=BAREFOOT_WARNING_WITH_LINE_BREAKS,
+    )
+
+    result = verify_label(application, extracted)
+
+    assert result.verdict == "PASS"
+    assert all(field.status == "PASS" for field in result.fields)
+
+
+def test_barefoot_bad_abv_extraction_still_fails_abv() -> None:
+    application = ApplicationData(
+        brand_name="BAREFOOT",
+        product_class="PINK MOSCATO",
+        producer="BAREFOOT WINES",
+        country_of_origin="USA",
+        abv="14.5%",
+        net_contents="750mL",
+        government_warning=BAREFOOT_WARNING,
+    )
+    extracted = ExtractedLabel(
+        brand_name="BAREFOOT",
+        product_class="PINK MOSCATO",
+        producer="VINTED & BOTTLED BY BAREFOOT WINES, MODESTO, CALIFORNIA",
+        country_of_origin="CALIFORNIA",
+        abv="IA 5c, ME 15%",
+        net_contents="750 mL",
+        government_warning=BAREFOOT_WARNING_WITH_LINE_BREAKS,
+    )
+
+    result = verify_label(application, extracted)
+    abv_result = next(field for field in result.fields if field.field == "abv")
+
+    assert result.verdict == "NEEDS_REVIEW"
+    assert abv_result.status == "FAIL"

@@ -123,6 +123,47 @@ def test_prompt_forces_verbatim_government_warning_capture() -> None:
         assert phrase in prompt
 
 
+def test_prompt_guides_country_level_origin_extraction() -> None:
+    prompt = EXTRACTION_PROMPT.lower()
+
+    for phrase in [
+        "return a country-level value",
+        "not a state, province",
+        "convert it to the country",
+        "california",
+        "mendoza",
+        "bordeaux",
+        "marlborough",
+    ]:
+        assert phrase in prompt
+
+
+def test_prompt_guides_producer_cleanup() -> None:
+    prompt = EXTRACTION_PROMPT.lower()
+
+    for phrase in [
+        "return only the business/entity name",
+        "vinted & bottled by",
+        "bottled by",
+        "remove trailing city/state/country location suffixes",
+        "barefoot wines",
+    ]:
+        assert phrase in prompt
+
+
+def test_prompt_guides_abv_context_and_uncertainty() -> None:
+    prompt = EXTRACTION_PROMPT.lower()
+
+    for phrase in [
+        "% alc/vol",
+        "% by vol",
+        "alcohol by volume",
+        "ignore unrelated ocr fragments",
+        "return null instead of guessing",
+    ]:
+        assert phrase in prompt
+
+
 @pytest.mark.anyio
 async def test_service_returns_complete_structured_data_from_fake_client() -> None:
     fake = FakeVisionClient(VisionClientResult(structured_data=populated_payload()))

@@ -35,12 +35,22 @@ const fieldLabels = {
 
 const fieldNames = Object.keys(fieldLabels);
 
+/**
+ * Show or hide the top-level message banner.
+ * @param {string} text Message text to display; empty text hides the banner.
+ * @param {string} type Visual message type, such as "info", "success", or "error".
+ * @returns {void}
+ */
 function setMessage(text, type = "info") {
   message.hidden = !text;
   message.textContent = text || "";
   message.className = `message ${type}`;
 }
 
+/**
+ * Check whether the backend health endpoint is reachable.
+ * @returns {Promise<void>} Updates the health badge text and styling in place.
+ */
 async function checkHealth() {
   try {
     const response = await fetch("/health", { cache: "no-store" });
@@ -55,18 +65,37 @@ async function checkHealth() {
   }
 }
 
+/**
+ * Convert an extracted value into display text.
+ * @param {*} value Raw value from the API.
+ * @returns {string} The value itself, or a friendly "not found" fallback.
+ */
 function valueOrDash(value) {
   return value === null || value === undefined || value === "" ? "Not found on label" : value;
 }
 
+/**
+ * Get all current label cards in display order.
+ * @returns {HTMLElement[]} Label-card elements currently in the form.
+ */
 function labelCards() {
   return [...cardsContainer.querySelectorAll(".label-card")];
 }
 
+/**
+ * Calculate a card's one-based position in the form.
+ * @param {HTMLElement} card Label-card element.
+ * @returns {number} One-based label number.
+ */
 function cardNumber(card) {
   return labelCards().indexOf(card) + 1;
 }
 
+/**
+ * Reset inline field-result rows to their pre-check state.
+ * @param {HTMLElement|null} card Optional card to scope the reset to.
+ * @returns {void}
+ */
 function clearInlineResults(card = null) {
   const scope = card || document;
   scope.querySelectorAll("[data-result-for]").forEach((item) => {
@@ -77,6 +106,12 @@ function clearInlineResults(card = null) {
   });
 }
 
+/**
+ * Render field-level verification results inside one label card.
+ * @param {HTMLElement} card Label-card element to update.
+ * @param {Array<object>} fields API field results for that label.
+ * @returns {void}
+ */
 function renderFields(card, fields) {
   clearInlineResults(card);
 
@@ -93,6 +128,11 @@ function renderFields(card, fields) {
   });
 }
 
+/**
+ * Render raw extracted values for the single-label detail panel.
+ * @param {object} extracted Extracted label object from the API.
+ * @returns {void}
+ */
 function renderExtracted(extracted) {
   extractedList.innerHTML = "";
 
@@ -105,6 +145,12 @@ function renderExtracted(extracted) {
   });
 }
 
+/**
+ * Render the compact result view used when exactly one label was checked.
+ * @param {object} item Single batch item returned by the API.
+ * @param {object} summary Batch summary returned by the API.
+ * @returns {void}
+ */
 function renderSingleResult(item, summary) {
   resultPanel.hidden = false;
   batchSummary.hidden = true;
@@ -123,6 +169,11 @@ function renderSingleResult(item, summary) {
   renderExtracted(item.extracted_label || {});
 }
 
+/**
+ * Render aggregate and per-label details for a multi-label batch.
+ * @param {object} body Full batch response from the API.
+ * @returns {void}
+ */
 function renderBatchResult(body) {
   resultPanel.hidden = false;
   extractedDetails.hidden = true;
@@ -197,6 +248,11 @@ function renderBatchResult(body) {
   });
 }
 
+/**
+ * Choose the correct result renderer for one-label or multi-label responses.
+ * @param {object} body Full batch response from the API.
+ * @returns {void}
+ */
 function renderResult(body) {
   if (body.results.length === 1) {
     renderSingleResult(body.results[0], body.summary);
@@ -211,6 +267,11 @@ function renderResult(body) {
   renderBatchResult(body);
 }
 
+/**
+ * Render API validation or server errors in plain language.
+ * @param {object} body Error response body from the API.
+ * @returns {void}
+ */
 function renderErrors(body) {
   const errors = body.errors || {};
   const parts = Object.entries(errors).map(([field, text]) => plainError(field, text));
@@ -218,6 +279,12 @@ function renderErrors(body) {
   message.focus();
 }
 
+/**
+ * Convert a field-specific API error into user-facing text.
+ * @param {string} field Field or request part that failed.
+ * @param {string} text API error text.
+ * @returns {string} Plain-English error suitable for the message banner.
+ */
 function plainError(field, text) {
   const label = fieldLabels[field] || (field === "images" ? "Label photos" : field === "image" ? "Label photo" : field);
   if ((field === "image" || field === "images") && text.includes("Unsupported")) {
@@ -243,6 +310,11 @@ function plainError(field, text) {
   return `${label}: ${text}`;
 }
 
+/**
+ * Disable or enable all form controls while a request is running.
+ * @param {boolean} isBusy Whether the UI should be locked.
+ * @returns {void}
+ */
 function setBusy(isBusy) {
   form.querySelectorAll("input, select, textarea, button").forEach((control) => {
     control.disabled = isBusy;
@@ -252,6 +324,11 @@ function setBusy(isBusy) {
   }
 }
 
+/**
+ * Show delayed progress feedback for slower verification requests.
+ * @param {number} count Number of labels being checked.
+ * @returns {void}
+ */
 function startProgress(count) {
   progressStartedAt = Date.now();
   progressTimer = setTimeout(() => {
@@ -264,12 +341,21 @@ function startProgress(count) {
   }, 700);
 }
 
+/**
+ * Stop any active progress timers and hide the progress panel.
+ * @returns {void}
+ */
 function stopProgress() {
   clearTimeout(progressTimer);
   clearInterval(elapsedTimer);
   progressPanel.hidden = true;
 }
 
+/**
+ * Submit the current batch to the backend and render the result.
+ * @param {SubmitEvent} event Browser submit event from the form.
+ * @returns {Promise<void>} Resolves after the UI is updated.
+ */
 async function submitVerification(event) {
   event.preventDefault();
   if (!isFormComplete()) {
@@ -311,6 +397,10 @@ async function submitVerification(event) {
   }
 }
 
+/**
+ * Restore the form to one blank label card and hide previous results.
+ * @returns {void}
+ */
 function resetForm() {
   cardsContainer.innerHTML = "";
   cardCount = 0;
@@ -321,6 +411,11 @@ function resetForm() {
   updateSubmitState();
 }
 
+/**
+ * Read the country value from a card, including the "Other" input path.
+ * @param {HTMLElement} card Label-card element.
+ * @returns {string} Trimmed country value for the API payload.
+ */
 function selectedCountryValue(card) {
   const countrySelect = card.querySelector('[data-field="country_of_origin"]');
   const countryOther = card.querySelector(".other-input");
@@ -330,6 +425,11 @@ function selectedCountryValue(card) {
   return countrySelect.value.trim();
 }
 
+/**
+ * Build the expected-field object for one label card.
+ * @param {HTMLElement} card Label-card element.
+ * @returns {object} Application data for one label, with ABV formatted as a percent.
+ */
 function cardData(card) {
   const values = {};
   fieldNames.forEach((name) => {
@@ -348,6 +448,10 @@ function cardData(card) {
   return values;
 }
 
+/**
+ * Build the multipart payload for the batch verification endpoint.
+ * @returns {FormData} FormData containing repeated `images` files and `items_json`.
+ */
 function buildBatchFormData() {
   const formData = new FormData();
   const items = [];
@@ -360,6 +464,11 @@ function buildBatchFormData() {
   return formData;
 }
 
+/**
+ * Determine whether one label card has all required user inputs.
+ * @param {HTMLElement} card Label-card element.
+ * @returns {boolean} True when the image and all seven fields are filled.
+ */
 function isCardComplete(card) {
   const image = card.querySelector('[data-field="image"]');
   if (!image.files.length) {
@@ -374,10 +483,18 @@ function isCardComplete(card) {
   });
 }
 
+/**
+ * Determine whether all label cards are complete enough to submit.
+ * @returns {boolean} True when every current card is complete.
+ */
 function isFormComplete() {
   return labelCards().every(isCardComplete);
 }
 
+/**
+ * Renumber cards and hide the remove button when only one card remains.
+ * @returns {void}
+ */
 function updateCardTitles() {
   const cards = labelCards();
   cards.forEach((card, index) => {
@@ -386,6 +503,10 @@ function updateCardTitles() {
   });
 }
 
+/**
+ * Refresh submit/reset/add-button states and status text from current form state.
+ * @returns {void}
+ */
 function updateSubmitState() {
   const cards = labelCards();
   const complete = cards.length > 0 && isFormComplete();
@@ -401,6 +522,10 @@ function updateSubmitState() {
     : "Add the missing items to check this label.";
 }
 
+/**
+ * Add a new label card and wire its event handlers.
+ * @returns {void}
+ */
 function addLabelCard() {
   if (labelCards().length >= maxLabels) {
     updateSubmitState();

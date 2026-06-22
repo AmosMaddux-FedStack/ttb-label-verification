@@ -1,3 +1,10 @@
+"""Run the vision extraction service against a sample or provided label image.
+
+This developer helper creates a simple sample label when needed, calls the real
+vision service configured by environment variables, and prints the extracted
+fields as JSON.
+"""
+
 import argparse
 import asyncio
 import json
@@ -18,6 +25,15 @@ SAMPLE_PATH = Path("samples/sample_label.jpg")
 
 
 def create_sample_image(path: Path) -> None:
+    """Create a simple local JPEG label for manual extraction checks.
+
+    Inputs:
+        Destination path for the generated sample image.
+
+    Outputs:
+        None. The function writes a JPEG image containing the seven expected
+        label fields.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     image = Image.new("RGB", (1400, 900), "white")
     draw = ImageDraw.Draw(image)
@@ -41,6 +57,17 @@ def create_sample_image(path: Path) -> None:
 
 
 async def main() -> None:
+    """Parse CLI arguments, run extraction, and print JSON output.
+
+    Inputs:
+        Optional image path argument. If omitted, `samples/sample_label.jpg` is
+        created when missing. The real service reads `OPENAI_API_KEY` and
+        optional `VISION_MODEL` from the environment.
+
+    Outputs:
+        None directly. Prints extracted label JSON to stdout or exits with a
+        setup message when the vision client is not configured.
+    """
     parser = argparse.ArgumentParser(description="Run VisionService against one sample label image.")
     parser.add_argument(
         "image_path",

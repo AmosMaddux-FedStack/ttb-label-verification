@@ -1,3 +1,9 @@
+"""Read-only readiness checks for a running deployment or local server.
+
+The script checks `GET /health`, `GET /`, and optionally posts a sample
+single-label verification request using environment-provided fields.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -24,6 +30,16 @@ REQUIRED_FIELDS = [
 
 
 def main() -> int:
+    """Parse command-line options and run the selected readiness checks.
+
+    Inputs:
+        CLI flags, plus optional environment variables such as
+        `READINESS_BASE_URL` and the `READINESS_*` verification fields.
+
+    Outputs:
+        Process exit code `0` when all checks pass, otherwise `1`. The function
+        also prints a JSON report to stdout.
+    """
     parser = argparse.ArgumentParser(description="Run read-only readiness checks against the app.")
     parser.add_argument(
         "--base-url",
@@ -51,6 +67,16 @@ def main() -> int:
 
 
 def check_get(url: str, *, expected_json: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Check a GET endpoint and optionally verify its JSON body.
+
+    Inputs:
+        `url` to request and optional `expected_json` payload for exact body
+        comparison.
+
+    Outputs:
+        A dictionary containing check name, pass/fail status, HTTP status, and
+        latency or error metadata.
+    """
     start = time.perf_counter()
     try:
         response = request.urlopen(url, timeout=15)
@@ -69,6 +95,16 @@ def check_get(url: str, *, expected_json: dict[str, Any] | None = None) -> dict[
 
 
 def check_verify(url: str) -> dict[str, Any]:
+    """Post one verification request using environment-provided sample data.
+
+    Inputs:
+        URL for the `/verify` endpoint. Image path and all field values are read
+        from `READINESS_LABEL_IMAGE` and `READINESS_<FIELD>` environment vars.
+
+    Outputs:
+        A check-result dictionary including verdict and API latency on success,
+        or missing-input/error details on failure.
+    """
     start = time.perf_counter()
     image_path = os.environ.get("READINESS_LABEL_IMAGE")
     fields = {field: os.environ.get(f"READINESS_{field.upper()}") for field in REQUIRED_FIELDS}
@@ -112,6 +148,14 @@ def check_verify(url: str) -> dict[str, Any]:
 
 
 def multipart_body(*, fields: dict[str, str], image_path: Path) -> tuple[bytes, str]:
+    """Build a multipart/form-data body for the readiness verification request.
+
+    Inputs:
+        Form field strings and a local image path.
+
+    Outputs:
+        `(body_bytes, content_type_header)` ready for `urllib.request.Request`.
+    """
     boundary = f"----readiness-{uuid.uuid4().hex}"
     chunks: list[bytes] = []
 
@@ -142,6 +186,15 @@ def multipart_body(*, fields: dict[str, str], image_path: Path) -> tuple[bytes, 
 
 
 def failure(name: str, start: float, exc: Exception) -> dict[str, Any]:
+    """Build a standardized failed-check dictionary.
+
+    Inputs:
+        Check name, start timestamp, and the exception that caused the failure.
+
+    Outputs:
+        A JSON-serializable dictionary with failure status, latency, and error
+        type.
+    """
     return {
         "name": name,
         "ok": False,
@@ -152,6 +205,14 @@ def failure(name: str, start: float, exc: Exception) -> dict[str, Any]:
 
 
 def elapsed_ms(start: float) -> int:
+    """Calculate elapsed milliseconds for readiness check reporting.
+
+    Inputs:
+        A `time.perf_counter()` start value.
+
+    Outputs:
+        Integer milliseconds elapsed since `start`.
+    """
     return int((time.perf_counter() - start) * 1000)
 
 

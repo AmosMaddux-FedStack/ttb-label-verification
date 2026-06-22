@@ -214,6 +214,45 @@ async def test_verify_real_multipart_warning_whitespace_only_difference_passes()
 
 
 @pytest.mark.anyio
+async def test_verify_real_multipart_barefoot_style_normalization_passes() -> None:
+    warning_with_newline = CANONICAL_WARNING.replace(
+        "GOVERNMENT WARNING:",
+        "GOVERNMENT WARNING:\n",
+    )
+    mock = MockVisionService(
+        [
+            ExtractedLabel(
+                brand_name="BAREFOOT",
+                product_class="PINK MOSCATO",
+                producer="VINTED & BOTTLED BY BAREFOOT WINES, MODESTO, CALIFORNIA",
+                country_of_origin="CALIFORNIA",
+                abv="14.5%",
+                net_contents="750 mL",
+                government_warning=warning_with_newline,
+            )
+        ]
+    )
+
+    response = await post_with_mock(
+        mock,
+        "/verify",
+        data=form_data(
+            brand_name="BAREFOOT",
+            product_class="PINK MOSCATO",
+            producer="BAREFOOT WINES",
+            country_of_origin="USA",
+            abv="14.5%",
+            net_contents="750mL",
+            government_warning=CANONICAL_WARNING,
+        ),
+        files={"image": file_tuple()},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["verification"]["verdict"] == "PASS"
+
+
+@pytest.mark.anyio
 async def test_batch_real_multipart_size_one_success() -> None:
     mock = MockVisionService()
 

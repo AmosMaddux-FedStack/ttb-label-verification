@@ -1,3 +1,10 @@
+"""Verification API routes and request orchestration.
+
+The functions in this module validate uploads and application data, invoke the
+vision extraction service, compare extracted label fields against the expected
+fields, and return either a single-label or batch result.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -40,10 +47,28 @@ VisionServiceProvider = Callable[[], VisionService]
 
 
 def get_vision_service_provider() -> VisionServiceProvider:
+    """Return the factory used to create a vision service for each request.
+
+    Inputs:
+        None.
+
+    Outputs:
+        A callable that returns `VisionService`. Tests override this dependency
+        with fake services so endpoint tests never require a real API key.
+    """
     return VisionService.from_env
 
 
 def _error_response(status_code: int, message: str, errors: dict[str, str]) -> JSONResponse:
+    """Build a consistent JSON error response.
+
+    Inputs:
+        `status_code` is the HTTP status to send, `message` is a short
+        user-facing summary, and `errors` maps failing fields to details.
+
+    Outputs:
+        A FastAPI `JSONResponse` containing the serialized `ErrorResponse`.
+    """
     return JSONResponse(
         status_code=status_code,
         content=ErrorResponse(message=message, errors=errors).model_dump(),
@@ -51,6 +76,14 @@ def _error_response(status_code: int, message: str, errors: dict[str, str]) -> J
 
 
 def _latency_ms(start: float) -> int:
+    """Calculate elapsed milliseconds from a `time.perf_counter()` start.
+
+    Inputs:
+        `start` is a monotonic timestamp captured before the measured work.
+
+    Outputs:
+        Integer milliseconds elapsed from `start` until this function is called.
+    """
     return int((time.perf_counter() - start) * 1000)
 
 
@@ -63,6 +96,16 @@ def _log_request(
     upload_size: int,
     event: str = "verify_request_complete",
 ) -> None:
+    """Emit structured request-completion information to the app logger.
+
+    Inputs:
+        Request latency, verdict, failed-field count, upload metadata, and an
+        optional event name.
+
+    Outputs:
+        None. The function writes an info log for normal requests and a warning
+        when the five-second latency budget is exceeded.
+    """
     exceeded_budget = latency_ms > 5000
     log = logger.warning if exceeded_budget else logger.info
     log(
@@ -78,6 +121,16 @@ def _log_request(
 
 
 def _validate_fields(values: dict[str, str | None]) -> tuple[dict[str, str], dict[str, str]]:
+    """Validate and trim required form/application fields.
+
+    Inputs:
+        A mapping from required field names to submitted strings or `None`.
+
+    Outputs:
+        A tuple of `(cleaned, errors)`. `cleaned` contains stripped strings for
+        fields that are present, while `errors` contains required/empty messages
+        keyed by field name.
+    """
     cleaned: dict[str, str] = {}
     errors: dict[str, str] = {}
 
@@ -98,6 +151,16 @@ def _validate_fields(values: dict[str, str | None]) -> tuple[dict[str, str], dic
 
 
 async def _validate_image(image: UploadFile | None) -> tuple[bytes | None, dict[str, str], int, int]:
+    """Read and validate one uploaded image.
+
+    Inputs:
+        A FastAPI `UploadFile` or `None`.
+
+    Outputs:
+        `(image_bytes, errors, byte_size, read_latency_ms)`. On success,
+        `image_bytes` contains the uploaded data and `errors` is empty. On
+        failure, `image_bytes` is `None` and `errors["image"]` explains why.
+    """
     read_start = time.perf_counter()
     if image is None:
         return None, {"image": "Image file is required."}, 0, _latency_ms(read_start)
@@ -120,6 +183,14 @@ async def _validate_image(image: UploadFile | None) -> tuple[bytes | None, dict[
 
 
 def _build_application(cleaned_fields: dict[str, str]) -> ApplicationData:
+    """Convert validated request fields into the verifier's expected model.
+
+    Inputs:
+        A complete dictionary of stripped field strings.
+
+    Outputs:
+        An `ApplicationData` instance used by the comparison layer.
+    """
     return ApplicationData(**cleaned_fields)
 
 
@@ -131,6 +202,16 @@ async def _verify_image_data(
     content_type: str | None,
     fields: dict[str, str],
 ) -> VerifyResponse:
+    """Run extraction and comparison for already-validated image bytes.
+
+    Inputs:
+        A vision service, raw image bytes, optional filename/content type, and
+        cleaned expected field values from the application form.
+
+    Outputs:
+        A `VerifyResponse` containing the extracted label, field comparison
+        result, total latency, and timing diagnostics.
+    """
     start = time.perf_counter()
     application = _build_application(fields)
     if hasattr(vision_service, "extract_label_with_metrics"):
@@ -170,6 +251,16 @@ def _null_batch_item(
     start: float,
     errors: dict[str, str],
 ) -> BatchItemResult:
+    """Create a failed batch item when validation or processing cannot continue.
+
+    Inputs:
+        The item index, optional filename, request start timestamp, and an error
+        dictionary for this label.
+
+    Outputs:
+        A `BatchItemResult` with `NEEDS_REVIEW`, no extracted/verification data,
+        and the supplied errors.
+    """
     return BatchItemResult(
         index=index,
         filename=filename,
@@ -189,6 +280,16 @@ async def _verify_batch_item(
     vision_service: VisionService,
     semaphore: asyncio.Semaphore,
 ) -> BatchItemResult:
+    """Validate and verify one image/application pair inside a batch.
+
+    Inputs:
+        The pair index, uploaded image, decoded item object, shared vision
+        service, and semaphore that bounds concurrent vision calls.
+
+    Outputs:
+        A populated `BatchItemResult`. Validation or extraction failures are
+        represented as `NEEDS_REVIEW` items rather than aborting the whole batch.
+    """
     start = time.perf_counter()
     filename = image.filename
     errors: dict[str, str] = {}
@@ -258,6 +359,16 @@ async def verify_endpoint(
     net_contents: OptionalForm = None,
     government_warning: OptionalForm = None,
 ) -> VerifyResponse | JSONResponse:
+    """Handle the single-label multipart verification endpoint.
+
+    Inputs:
+        One uploaded image plus the seven expected label fields supplied as form
+        values. The vision service provider is injected for testability.
+
+    Outputs:
+        `VerifyResponse` on success, or an `ErrorResponse` JSON body for invalid
+        input or unexpected server errors.
+    """
     start = time.perf_counter()
     content_type = image.content_type if image else None
 
@@ -355,6 +466,17 @@ async def verify_batch_endpoint(
     images: Annotated[list[UploadFile] | None, File()] = None,
     items_json: OptionalForm = None,
 ) -> BatchVerifyResponse | JSONResponse:
+    """Handle multipart batch verification for one to five labels.
+
+    Inputs:
+        `images` contains uploaded label photos. `items_json` is a JSON array of
+        expected field dictionaries whose order must match `images`.
+
+    Outputs:
+        `BatchVerifyResponse` with aggregate counts and per-label results, or an
+        `ErrorResponse` JSON body for invalid request shape, size limits, or
+        unexpected server errors.
+    """
     start = time.perf_counter()
 
     if not images:
