@@ -189,6 +189,31 @@ async def test_verify_real_multipart_warning_case_mismatch_returns_needs_review(
 
 
 @pytest.mark.anyio
+async def test_verify_real_multipart_warning_whitespace_only_difference_passes() -> None:
+    warning_with_extra_space = CANONICAL_WARNING.replace(
+        "GOVERNMENT WARNING:",
+        "GOVERNMENT  WARNING:",
+    )
+    mock = MockVisionService([matching_extracted_label(government_warning=warning_with_extra_space)])
+
+    response = await post_with_mock(
+        mock,
+        "/verify",
+        data=form_data(),
+        files={"image": file_tuple()},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verification"]["verdict"] == "PASS"
+    warning = next(
+        field for field in body["verification"]["fields"] if field["field"] == "government_warning"
+    )
+    assert warning["status"] == "PASS"
+    assert warning["extracted_value"] == warning_with_extra_space
+
+
+@pytest.mark.anyio
 async def test_batch_real_multipart_size_one_success() -> None:
     mock = MockVisionService()
 

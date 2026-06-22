@@ -327,13 +327,16 @@ Net contents comparison:
 Government warning comparison:
 
 - Function: `compare_government_warning(application, extracted) -> FieldResult`
-- Exact string equality only.
+- Case-sensitive exact match after whitespace collapse.
+- Whitespace collapse trims leading/trailing whitespace and treats repeated spaces, tabs, and line
+  breaks as one space.
 - Case-sensitive.
 - No fuzzy matching.
 - No punctuation normalization.
-- No whitespace normalization.
-- Any missing, changed-case, extra-space, missing-punctuation, missing-colon, or reworded warning
+- No case normalization.
+- Any missing, changed-case, missing-punctuation, missing-colon, misspelled, or reworded warning
   fails.
+- Whitespace-only differences pass.
 - On failure, the `FieldResult.extracted_value` must preserve and return the extracted warning text
   exactly as received, so a user can see what the model/OCR read.
 
@@ -399,7 +402,9 @@ Government warning tests:
 - Lowercase warning fails.
 - Warning missing colon fails.
 - Missing punctuation fails.
-- Extra space fails.
+- Extra spaces pass when whitespace is the only difference.
+- Leading/trailing whitespace passes.
+- Newlines and tabs are treated as spaces.
 - Missing extracted warning fails.
 - Reworded warning fails.
 - Misread warning failure keeps extracted warning text in `FieldResult.extracted_value`.
@@ -417,8 +422,8 @@ Verification result tests:
 - Fuzzy threshold `90.0` is conservative but may need tuning once real labels arrive.
 - ABV and net-content tolerances are deterministic guesses for Phase 1; they should be reviewed
   against actual TTB/business expectations later.
-- Government warning is intentionally strict per project rules, even if OCR introduces small
-  whitespace, punctuation, or case differences.
+- Government warning is intentionally strict for wording, punctuation, and case; whitespace-only OCR
+  differences are tolerated by collapsing repeated spaces, tabs, and line breaks.
 - The ABV parser must avoid accidentally comparing proof numbers as ABV when both are present.
 
 
@@ -489,7 +494,7 @@ Extract these seven fields:
    The net contents statement exactly as visible, such as "750 mL", "1 L", or "12 FL OZ".
 
 7. government_warning
-   The government warning text exactly as visible on the label. This field is critical because the downstream verifier requires an exact, case-sensitive match.
+   The government warning text exactly as visible on the label. This field is critical because the downstream verifier requires a case-sensitive match after whitespace collapse.
 
 Rules:
 - If a field is not visible, unreadable, blocked by glare, too blurry, cut off, or uncertain, return null for that field.
@@ -659,7 +664,8 @@ Required non-500 cases:
   immediately before returning the response or error.
 - `VisionService` already handles blurry, invalid, or provider-failed extraction by returning null fields, so `/verify` should still compare and return `NEEDS_REVIEW` when extraction is partial.
 - If `VisionService.extract_label` itself raises unexpectedly, catch it at the endpoint boundary and return a generic `500` error.
-- Government warning remains exact/case-sensitive because `/verify` delegates comparison to the existing Phase 1 `verify_label`.
+- Government warning remains case-sensitive after whitespace collapse because `/verify` delegates
+  comparison to the existing Phase 1 `verify_label`.
 - Government warning extracted text is surfaced twice on failures: in `extracted_label.government_warning`
   and in the `government_warning` `FieldResult.extracted_value`.
 
@@ -1033,8 +1039,8 @@ images degrade to partial/null extraction, tightening validation/error messages,
 accessibility pass for the 70+ user bar.
 
 Primary success criterion: single-label verification on the deployed Railway app is reliably under
-`5 seconds` while preserving exact government-warning comparison and clear `NEEDS_REVIEW`
-degradation for poor inputs.
+`5 seconds` while preserving case-sensitive government-warning comparison after whitespace collapse
+and clear `NEEDS_REVIEW` degradation for poor inputs.
 
 ## Full Checklist Review
 
@@ -1136,7 +1142,7 @@ Audit and adjust the existing plain HTML/CSS/JS UI:
 - Add preprocessing size tests for large generated images and selected long-edge/quality settings.
 - Add imperfect-image fixture tests for blurry, cropped, glare, non-label, and non-image inputs.
 - Add validation tests for wrong file type, oversized files, empty submit, blank fields, malformed batch data, and too many batch labels.
-- Preserve and expand comparison tests for valid label, mismatches, case-only ordinary fields, ABV normalization, unit normalization, and government-warning exactness.
+- Preserve and expand comparison tests for valid label, mismatches, case-only ordinary fields, ABV normalization, unit normalization, and government-warning exactness after whitespace collapse.
 - Add frontend tests or smoke checks for plain-English errors, visible labels, button disabled/enabled behavior, summary counts, and opening individual batch results.
 - Measure deployed single-label latency against the real test images and record p50/p90/p95 before and after any tuning.
 
@@ -1145,7 +1151,8 @@ Audit and adjust the existing plain HTML/CSS/JS UI:
 - Phase 6 introduces no new features, no database, no queue, and no new UI workflow.
 - Railway production URL is the source of truth for latency targets.
 - Batch remains capped at 5 labels.
-- Government warning remains exact and case-sensitive; hardening must not normalize it.
+- Government warning remains exact and case-sensitive after whitespace collapse; hardening must not
+  normalize punctuation, wording, spelling, or case.
 
 # Phase 7 Plan: Final Readiness, README, And Secret Audit
 
@@ -1188,7 +1195,7 @@ The README should include:
   - synonym-normalized exact match for country,
   - numeric normalization for ABV,
   - unit normalization for bottle size,
-  - exact case-sensitive match for government warning.
+  - exact case-sensitive match after whitespace collapse for government warning.
 - Verdict rule: any failed field means `NEEDS REVIEW`; all fields passing means `APPROVED`.
 - Local setup using `uv`.
 - Local run command.

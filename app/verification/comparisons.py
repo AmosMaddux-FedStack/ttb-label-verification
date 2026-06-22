@@ -233,11 +233,13 @@ def compare_net_contents(application: str, extracted: str | None) -> FieldResult
 
 
 def compare_government_warning(application: str, extracted: str | None) -> FieldResult:
-    strategy = "exact_case_sensitive"
+    strategy = "exact_case_sensitive_whitespace_collapsed"
     if extracted is None:
         return _missing_result("government_warning", application, strategy)
 
-    status = "PASS" if application == extracted else "FAIL"
+    normalized_application = _collapse_whitespace(application)
+    normalized_extracted = _collapse_whitespace(extracted)
+    status = "PASS" if normalized_application == normalized_extracted else "FAIL"
 
     return FieldResult(
         field="government_warning",
@@ -245,10 +247,12 @@ def compare_government_warning(application: str, extracted: str | None) -> Field
         application_value=application,
         extracted_value=extracted,
         strategy=strategy,
+        normalized_application_value=normalized_application,
+        normalized_extracted_value=normalized_extracted,
         message=(
-            "Government warning matched exactly."
+            "Government warning matched after whitespace cleanup."
             if status == "PASS"
-            else "Government warning must match exactly."
+            else "Government warning wording, capitalization, and punctuation must match."
         ),
     )
 

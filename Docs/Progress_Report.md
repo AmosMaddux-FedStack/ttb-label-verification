@@ -16,6 +16,8 @@ Phases 0 through 7 are implemented through the current documentation/readiness p
 Follow-up hardening pass completed:
 
 - Phase 1 fuzzy matching now uses `rapidfuzz.fuzz.token_sort_ratio` as specified in `Docs/Plan.md`.
+- Government-warning comparison now uses case-sensitive exact matching after whitespace collapse;
+  wording, capitalization, punctuation, colon, and spelling differences still fail.
 - API response models use stricter status literals and safe default factories for timing maps.
 - Added real FastAPI multipart tests for `/verify` and `/verify/batch`.
 - Added generated imperfect-image tests for blurry, cropped, glare-like, non-label, and non-image paths.
@@ -288,19 +290,20 @@ Strict government warning behavior:
 - Lowercase warning fails.
 - Warning missing the colon fails.
 - Missing punctuation fails.
-- Extra space fails.
+- Whitespace-only differences such as repeated spaces, tabs, or line breaks pass.
 - Missing extracted warning fails.
 - Reworded warning fails.
 - Misread warning failures preserve the exact extracted warning text in `FieldResult.extracted_value`.
 
-The implementation uses strict case-sensitive equality for the government warning:
+The implementation uses strict case-sensitive comparison after whitespace collapse for the
+government warning:
 
 ```python
-status = "PASS" if application == extracted else "FAIL"
+status = "PASS" if normalized_application == normalized_extracted else "FAIL"
 ```
 
-The Phase 1 work honored the no-network requirement. No new dependency was installed during
-execution; fuzzy matching is currently deterministic local standard-library logic.
+The Phase 1 work honored the no-network requirement. Fuzzy matching now uses local deterministic
+RapidFuzz token-sort scoring.
 
 ## Phase 2 VisionService
 
@@ -466,8 +469,8 @@ Local HTTP success check:
   `extracted_label`.
 - Observed `latency_ms`: `3249`.
 - Observed verdict: `NEEDS_REVIEW`.
-- Reason: government warning failed exact comparison because the model extracted line breaks in the
-  warning text. This is correct strict behavior.
+- Note: current government-warning comparison now tolerates whitespace-only OCR differences such as
+  extracted line breaks while preserving strict wording, punctuation, and case checks.
 
 Invalid input checks:
 
@@ -776,6 +779,6 @@ Future work should stay inside the standing project rules:
 
 - Single-label result under 5 seconds.
 - Batch upload is required.
-- Government warning match is exact and case-sensitive.
+- Government warning match is exact and case-sensitive after whitespace collapse.
 - Other fields are fuzzy/normalized.
 - API keys must only live in environment variables, never in code or commits.

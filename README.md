@@ -39,7 +39,7 @@ The app verifies these seven fields:
 ## Matching Rules
 
 Most fields are forgiving because OCR and label formatting vary. The government warning is strict
-because the project requirement is exact, case-sensitive matching.
+for wording, punctuation, and capitalization, while tolerating whitespace-only OCR differences.
 
 | Field | Strategy |
 | --- | --- |
@@ -49,7 +49,11 @@ because the project requirement is exact, case-sensitive matching.
 | Country | Exact match after country synonym normalization |
 | Alcohol percentage | Numeric ABV normalization with tolerance |
 | Bottle size | Unit normalization to milliliters with tolerance |
-| Government warning | Exact, case-sensitive string match |
+| Government warning | Case-sensitive exact match after whitespace collapse |
+
+Whitespace-only OCR differences such as line breaks, tabs, repeated spaces, or leading/trailing
+spaces are tolerated for the government warning. Capitalization, punctuation, colon, spelling, and
+wording must still match.
 
 Verdict rule:
 

@@ -240,6 +240,27 @@ async def test_warning_extracted_text_is_surfaced_on_failure() -> None:
 
 
 @pytest.mark.anyio
+async def test_warning_whitespace_only_difference_passes_and_preserves_original() -> None:
+    warning_with_newline = CANONICAL_WARNING.replace(
+        "GOVERNMENT WARNING:",
+        "GOVERNMENT WARNING:\n",
+    )
+    mock = MockVisionService(extracted=matching_extracted_label(government_warning=warning_with_newline))
+
+    response = await call_verify(mock, image=upload_file())
+    body = response_body(response)
+    warning_result = next(
+        field for field in body["verification"]["fields"] if field["field"] == "government_warning"
+    )
+
+    assert response_status(response) == 200
+    assert body["verification"]["verdict"] == "PASS"
+    assert warning_result["status"] == "PASS"
+    assert warning_result["extracted_value"] == warning_with_newline
+    assert warning_result["normalized_extracted_value"] == CANONICAL_WARNING
+
+
+@pytest.mark.anyio
 async def test_partial_extraction_returns_needs_review_not_exception() -> None:
     mock = MockVisionService(extracted=matching_extracted_label(producer=None, abv=None))
 

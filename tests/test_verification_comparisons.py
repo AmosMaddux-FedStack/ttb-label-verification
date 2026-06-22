@@ -306,12 +306,59 @@ def test_government_warning_missing_punctuation_fails() -> None:
     assert result.status == "FAIL"
 
 
-def test_government_warning_extra_space_fails() -> None:
+def test_government_warning_extra_internal_space_passes() -> None:
     extra_space = CANONICAL_WARNING.replace("GOVERNMENT WARNING:", "GOVERNMENT  WARNING:")
 
     result = compare_government_warning(CANONICAL_WARNING, extra_space)
 
-    assert result.status == "FAIL"
+    assert result.status == "PASS"
+
+
+def test_government_warning_leading_whitespace_passes() -> None:
+    result = compare_government_warning(CANONICAL_WARNING, f"  {CANONICAL_WARNING}")
+
+    assert result.status == "PASS"
+
+
+def test_government_warning_trailing_whitespace_passes() -> None:
+    result = compare_government_warning(CANONICAL_WARNING, f"{CANONICAL_WARNING}  ")
+
+    assert result.status == "PASS"
+
+
+def test_government_warning_newline_treated_as_space_passes() -> None:
+    with_newline = CANONICAL_WARNING.replace("GOVERNMENT WARNING:", "GOVERNMENT WARNING:\n")
+
+    result = compare_government_warning(CANONICAL_WARNING, with_newline)
+
+    assert result.status == "PASS"
+
+
+def test_government_warning_tab_treated_as_space_passes() -> None:
+    with_tab = CANONICAL_WARNING.replace("GOVERNMENT WARNING:", "GOVERNMENT\tWARNING:")
+
+    result = compare_government_warning(CANONICAL_WARNING, with_tab)
+
+    assert result.status == "PASS"
+
+
+def test_government_warning_extracted_value_is_original_not_normalized() -> None:
+    extra_space = CANONICAL_WARNING.replace("GOVERNMENT WARNING:", "GOVERNMENT  WARNING:")
+
+    result = compare_government_warning(CANONICAL_WARNING, extra_space)
+
+    assert result.status == "PASS"
+    assert result.extracted_value == extra_space
+    assert result.normalized_extracted_value == CANONICAL_WARNING
+
+
+def test_government_warning_normalized_values_are_populated() -> None:
+    extra_space = CANONICAL_WARNING.replace("GOVERNMENT WARNING:", "GOVERNMENT  WARNING:")
+
+    result = compare_government_warning(CANONICAL_WARNING, extra_space)
+
+    assert result.normalized_application_value == CANONICAL_WARNING
+    assert result.normalized_extracted_value == CANONICAL_WARNING
 
 
 def test_missing_extracted_government_warning_fails() -> None:
