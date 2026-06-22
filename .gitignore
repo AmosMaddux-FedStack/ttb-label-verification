@@ -20,8 +20,6 @@ build/
 samples/
 tests/test_images/
 
-Docs/
-
 .DS_Store
 .idea/
 .vscode/
