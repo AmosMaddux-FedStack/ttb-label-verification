@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from difflib import SequenceMatcher
+
+from rapidfuzz import fuzz
 
 from app.verification.models import ApplicationData, ExtractedLabel, FieldResult, VerificationResult
 
@@ -62,11 +63,7 @@ def _normalize_country(value: str) -> str:
 
 
 def _token_sort_ratio(application: str, extracted: str) -> float:
-    application_tokens = sorted(application.split())
-    extracted_tokens = sorted(extracted.split())
-    application_sorted = " ".join(application_tokens)
-    extracted_sorted = " ".join(extracted_tokens)
-    return SequenceMatcher(None, application_sorted, extracted_sorted).ratio() * 100
+    return float(fuzz.token_sort_ratio(application, extracted))
 
 
 def _missing_result(field: str, application: str, strategy: str) -> FieldResult:

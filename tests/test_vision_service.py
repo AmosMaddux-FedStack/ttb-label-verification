@@ -3,7 +3,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 from app.verification.models import ExtractedLabel
 from app.vision.client import VisionClientResult, VisionConfigurationError
@@ -24,6 +24,44 @@ def image_bytes(size: tuple[int, int] = (600, 400), image_format: str = "PNG") -
     return buffer.getvalue()
 
 
+def image_to_bytes(image: Image.Image, image_format: str = "PNG") -> bytes:
+    buffer = BytesIO()
+    image.save(buffer, format=image_format)
+    return buffer.getvalue()
+
+
+def blurry_label_bytes() -> bytes:
+    image = Image.new("RGB", (900, 500), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((80, 120), "ACME RESERVE", fill="black")
+    draw.text((80, 180), "13.5% Alc. by Vol.", fill="black")
+    return image_to_bytes(image.filter(ImageFilter.GaussianBlur(radius=6)))
+
+
+def cropped_label_bytes() -> bytes:
+    image = Image.new("RGB", (900, 500), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((80, 120), "ACME RESERVE", fill="black")
+    draw.text((80, 180), "GOVERNMENT WARNING: cropped text", fill="black")
+    return image_to_bytes(image.crop((0, 0, 450, 260)))
+
+
+def glare_label_bytes() -> bytes:
+    image = Image.new("RGB", (900, 500), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((80, 120), "ACME RESERVE", fill="black")
+    draw.text((80, 180), "750 mL", fill="black")
+    draw.rectangle((40, 80, 860, 240), fill=(252, 252, 252))
+    return image_to_bytes(image)
+
+
+def non_label_image_bytes() -> bytes:
+    image = Image.new("RGB", (500, 500), (200, 220, 240))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((120, 120, 380, 380), fill=(80, 130, 180))
+    return image_to_bytes(image)
+
+
 def populated_payload() -> dict[str, str]:
     return {
         "brand_name": "Acme Reserve",
@@ -40,8 +78,8 @@ def test_preprocessing_downscales_large_images_and_outputs_jpeg_rgb() -> None:
     prepared = prepare_image(image_bytes(size=(3000, 1200)))
 
     assert prepared.content_type == "image/jpeg"
-    assert prepared.width == 1600
-    assert prepared.height == 640
+    assert prepared.width == 1400
+    assert prepared.height == 560
     assert prepared.data.startswith(b"\xff\xd8")
 
     reopened = Image.open(BytesIO(prepared.data))
@@ -192,6 +230,41 @@ async def test_non_image_bytes_return_all_nulls_without_calling_client() -> None
     extracted = await service.extract_label(b"not an image")
 
     assert fake.calls == 0
+    assert extracted == null_extracted_label()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "generated_image",
+    [
+        blurry_label_bytes(),
+        cropped_label_bytes(),
+        glare_label_bytes(),
+    ],
+)
+async def test_imperfect_generated_images_degrade_to_partial_or_null_data(
+    generated_image: bytes,
+) -> None:
+    payload = populated_payload()
+    payload["producer"] = None
+    payload["government_warning"] = None
+    service = VisionService(client=FakeVisionClient(VisionClientResult(structured_data=payload)))
+
+    extracted = await service.extract_label(generated_image)
+
+    assert extracted.brand_name == "Acme Reserve"
+    assert extracted.producer is None
+    assert extracted.government_warning is None
+
+
+@pytest.mark.anyio
+async def test_generated_non_label_image_returns_all_nulls() -> None:
+    fake = FakeVisionClient(VisionClientResult(structured_data=null_extracted_label().model_dump()))
+    service = VisionService(client=fake)
+
+    extracted = await service.extract_label(non_label_image_bytes())
+
+    assert fake.calls == 1
     assert extracted == null_extracted_label()
 
 

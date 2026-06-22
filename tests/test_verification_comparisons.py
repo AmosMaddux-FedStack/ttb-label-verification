@@ -88,6 +88,13 @@ def test_brand_case_and_punctuation_difference_passes() -> None:
     assert result.status == "PASS"
 
 
+def test_brand_token_order_difference_passes() -> None:
+    result = compare_brand_name("Reserve Acme", "Acme Reserve")
+
+    assert result.status == "PASS"
+    assert result.score == 100.0
+
+
 def test_brand_minor_ocr_typo_above_threshold_passes() -> None:
     result = compare_brand_name("Acme Reserve", "Acme Resrve")
 

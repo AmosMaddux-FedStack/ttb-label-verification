@@ -1,20 +1,26 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import time
 from collections.abc import Callable
+from io import BytesIO
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse
+from PIL import Image, UnidentifiedImageError
 
-from app.api.models import ErrorResponse, VerifyResponse
+from app.api.models import BatchItemResult, BatchSummary, BatchVerifyResponse, ErrorResponse, VerifyResponse
 from app.verification.comparisons import verify_label
-from app.verification.models import ApplicationData
+from app.verification.models import ApplicationData, ExtractedLabel
 from app.vision.service import VisionService
 
 
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+MAX_BATCH_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_BATCH_SIZE = 5
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 REQUIRED_FIELDS = [
     "brand_name",
@@ -91,19 +97,144 @@ def _validate_fields(values: dict[str, str | None]) -> tuple[dict[str, str], dic
     return cleaned, errors
 
 
-async def _validate_image(image: UploadFile | None) -> tuple[bytes | None, dict[str, str], int]:
+async def _validate_image(image: UploadFile | None) -> tuple[bytes | None, dict[str, str], int, int]:
+    read_start = time.perf_counter()
     if image is None:
-        return None, {"image": "Image file is required."}, 0
+        return None, {"image": "Image file is required."}, 0, _latency_ms(read_start)
 
     if image.content_type not in ALLOWED_IMAGE_TYPES:
-        return None, {"image": "Unsupported file type."}, 0
+        return None, {"image": "Unsupported file type."}, 0, _latency_ms(read_start)
 
     data = await image.read()
     size = len(data)
     if size > MAX_UPLOAD_BYTES:
-        return None, {"image": "File is larger than 8 MB."}, size
+        return None, {"image": "File is larger than 8 MB."}, size, _latency_ms(read_start)
 
-    return data, {}, size
+    try:
+        with Image.open(BytesIO(data)) as opened:
+            opened.verify()
+    except (OSError, UnidentifiedImageError):
+        return None, {"image": "Image file could not be read."}, size, _latency_ms(read_start)
+
+    return data, {}, size, _latency_ms(read_start)
+
+
+def _build_application(cleaned_fields: dict[str, str]) -> ApplicationData:
+    return ApplicationData(**cleaned_fields)
+
+
+async def _verify_image_data(
+    *,
+    vision_service: VisionService,
+    image_bytes: bytes,
+    filename: str | None,
+    content_type: str | None,
+    fields: dict[str, str],
+) -> VerifyResponse:
+    start = time.perf_counter()
+    application = _build_application(fields)
+    if hasattr(vision_service, "extract_label_with_metrics"):
+        extraction = await vision_service.extract_label_with_metrics(
+            image_bytes,
+            filename=filename,
+            content_type=content_type,
+        )
+        extracted = extraction.label
+        timings = dict(extraction.timings)
+    else:
+        vision_start = time.perf_counter()
+        extracted = await vision_service.extract_label(
+            image_bytes,
+            filename=filename,
+            content_type=content_type,
+        )
+        timings = {"vision_ms": _latency_ms(vision_start)}
+
+    compare_start = time.perf_counter()
+    verification = verify_label(application, extracted)
+    timings["compare_ms"] = _latency_ms(compare_start)
+    timings["verify_image_ms"] = _latency_ms(start)
+
+    return VerifyResponse(
+        verification=verification,
+        latency_ms=_latency_ms(start),
+        extracted_label=extracted,
+        timings=timings,
+    )
+
+
+def _null_batch_item(
+    *,
+    index: int,
+    filename: str | None,
+    start: float,
+    errors: dict[str, str],
+) -> BatchItemResult:
+    return BatchItemResult(
+        index=index,
+        filename=filename,
+        status="NEEDS_REVIEW",
+        verification=None,
+        extracted_label=None,
+        latency_ms=_latency_ms(start),
+        errors=errors,
+    )
+
+
+async def _verify_batch_item(
+    *,
+    index: int,
+    image: UploadFile,
+    item: object,
+    vision_service: VisionService,
+    semaphore: asyncio.Semaphore,
+) -> BatchItemResult:
+    start = time.perf_counter()
+    filename = image.filename
+    errors: dict[str, str] = {}
+
+    if not isinstance(item, dict):
+        errors["item"] = "Application data must be an object."
+    else:
+        cleaned_fields, field_errors = _validate_fields(
+            {field: item.get(field) for field in REQUIRED_FIELDS}
+        )
+        errors.update(field_errors)
+
+    image_bytes, image_errors, _upload_size, image_read_ms = await _validate_image(image)
+    errors.update(image_errors)
+
+    if errors:
+        return _null_batch_item(index=index, filename=filename, start=start, errors=errors)
+
+    try:
+        async with semaphore:
+            result = await _verify_image_data(
+                vision_service=vision_service,
+                image_bytes=image_bytes or b"",
+                filename=filename,
+                content_type=image.content_type,
+                fields=cleaned_fields,
+            )
+    except Exception:
+        logger.exception("verify_batch_item_failed index=%s filename=%s", index, filename)
+        return _null_batch_item(
+            index=index,
+            filename=filename,
+            start=start,
+            errors={"server": "Verification failed for this label."},
+        )
+
+    return BatchItemResult(
+        index=index,
+        filename=filename,
+        status=result.verification.verdict,
+        verification=result.verification,
+        extracted_label=result.extracted_label,
+        latency_ms=_latency_ms(start),
+        timings={**result.timings, "image_read_ms": image_read_ms},
+        errors={},
+    )
 
 
 @router.post(
@@ -140,7 +271,7 @@ async def verify_endpoint(
         "government_warning": government_warning,
     }
     cleaned_fields, field_errors = _validate_fields(field_values)
-    image_bytes, image_errors, upload_size = await _validate_image(image)
+    image_bytes, image_errors, upload_size, image_read_ms = await _validate_image(image)
     errors = {**image_errors, **field_errors}
 
     if errors:
@@ -163,16 +294,15 @@ async def verify_endpoint(
             errors,
         )
 
-    application = ApplicationData(**cleaned_fields)
-
     try:
         vision_service = vision_service_provider()
-        extracted = await vision_service.extract_label(
-            image_bytes or b"",
+        result = await _verify_image_data(
+            vision_service=vision_service,
+            image_bytes=image_bytes or b"",
             filename=image.filename if image else None,
             content_type=content_type,
+            fields=cleaned_fields,
         )
-        verification = verify_label(application, extracted)
     except Exception:
         latency = _latency_ms(start)
         logger.exception(
@@ -188,17 +318,152 @@ async def verify_endpoint(
         )
 
     latency = _latency_ms(start)
-    failure_count = sum(field.status == "FAIL" for field in verification.fields)
+    failure_count = sum(field.status == "FAIL" for field in result.verification.fields)
     _log_request(
         latency_ms=latency,
-        verdict=verification.verdict,
+        verdict=result.verification.verdict,
         failure_count=failure_count,
         content_type=content_type,
         upload_size=upload_size,
     )
 
     return VerifyResponse(
-        verification=verification,
+        verification=result.verification,
         latency_ms=latency,
-        extracted_label=extracted,
+        extracted_label=result.extracted_label,
+        timings={
+            **result.timings,
+            "image_read_ms": image_read_ms,
+            "request_total_ms": latency,
+            "failure_count": failure_count,
+            "verdict": result.verification.verdict,
+        },
+    )
+
+
+@router.post(
+    "/verify/batch",
+    response_model=BatchVerifyResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        413: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def verify_batch_endpoint(
+    vision_service_provider: Annotated[VisionServiceProvider, Depends(get_vision_service_provider)],
+    images: Annotated[list[UploadFile] | None, File()] = None,
+    items_json: OptionalForm = None,
+) -> BatchVerifyResponse | JSONResponse:
+    start = time.perf_counter()
+
+    if not images:
+        return _error_response(400, "Please add at least one label.", {"images": "At least one image is required."})
+
+    if len(images) > MAX_BATCH_SIZE:
+        return _error_response(
+            400,
+            "Please check no more than 5 labels at a time.",
+            {"images": "Maximum batch size is 5."},
+        )
+
+    if not items_json:
+        return _error_response(
+            400,
+            "Please provide application data for each label.",
+            {"items_json": "Application data is required."},
+        )
+
+    try:
+        items = json.loads(items_json)
+    except json.JSONDecodeError:
+        return _error_response(
+            400,
+            "Please provide valid application data for each label.",
+            {"items_json": "Application data must be valid JSON."},
+        )
+
+    if not isinstance(items, list):
+        return _error_response(
+            400,
+            "Please provide application data for each label.",
+            {"items_json": "Application data must be a list."},
+        )
+
+    if not items:
+        return _error_response(400, "Please add at least one label.", {"items_json": "At least one item is required."})
+
+    if len(items) != len(images):
+        return _error_response(
+            400,
+            "Each label needs one photo and one set of application data.",
+            {"items_json": "Image count and application data count must match."},
+        )
+
+    try:
+        total_upload_size = 0
+        for image in images:
+            data = await image.read()
+            total_upload_size += len(data)
+            if hasattr(image, "file"):
+                image.file.seek(0)
+    except Exception:
+        logger.exception("verify_batch_upload_read_failed")
+        return _error_response(
+            400,
+            "One or more images could not be read.",
+            {"images": "Please choose valid image files."},
+        )
+
+    if total_upload_size > MAX_BATCH_UPLOAD_BYTES:
+        return _error_response(
+            413,
+            "The selected photos are too large. Please keep the batch under 25 MB.",
+            {"images": "Total upload is larger than 25 MB."},
+        )
+
+    try:
+        vision_service = vision_service_provider()
+        semaphore = asyncio.Semaphore(MAX_BATCH_SIZE)
+        results = await asyncio.gather(
+            *[
+                _verify_batch_item(
+                    index=index,
+                    image=image,
+                    item=item,
+                    vision_service=vision_service,
+                    semaphore=semaphore,
+                )
+                for index, (image, item) in enumerate(zip(images, items, strict=True))
+            ]
+        )
+    except Exception:
+        latency = _latency_ms(start)
+        logger.exception("verify_batch_failed latency_ms=%s", latency)
+        return _error_response(
+            500,
+            "Batch verification failed unexpectedly.",
+            {"server": "Unexpected internal failure."},
+        )
+
+    passed = sum(item.status == "PASS" for item in results)
+    needs_review = sum(item.status == "NEEDS_REVIEW" for item in results)
+    latency = _latency_ms(start)
+
+    logger.info(
+        "verify_batch_complete latency_ms=%s passed=%s needs_review=%s total=%s",
+        latency,
+        passed,
+        needs_review,
+        len(results),
+    )
+
+    return BatchVerifyResponse(
+        summary=BatchSummary(
+            passed=passed,
+            needs_review=needs_review,
+            total=len(results),
+            latency_ms=latency,
+        ),
+        results=results,
     )

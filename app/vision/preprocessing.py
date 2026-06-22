@@ -4,8 +4,8 @@ from io import BytesIO
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 
-MAX_LONG_EDGE = 1600
-JPEG_QUALITY = 82
+MAX_LONG_EDGE = 1400
+JPEG_QUALITY = 76
 
 
 class ImagePreprocessingError(ValueError):

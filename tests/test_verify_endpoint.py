@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from io import BytesIO
@@ -5,9 +6,10 @@ from io import BytesIO
 import pytest
 from fastapi.responses import JSONResponse
 from PIL import Image
+from pydantic import ValidationError
 
-from app.api.models import VerifyResponse
-from app.api.verify import verify_endpoint
+from app.api.models import BatchItemResult, BatchVerifyResponse, VerifyResponse
+from app.api.verify import verify_batch_endpoint, verify_endpoint
 from app.verification.models import ExtractedLabel
 
 
@@ -38,6 +40,44 @@ class MockVisionService:
         self.calls += 1
         if self.error is not None:
             raise self.error
+        return self.extracted
+
+
+class SequencedMockVisionService:
+    def __init__(self, extracted: list[ExtractedLabel]) -> None:
+        self.extracted = extracted
+        self.calls = 0
+
+    async def extract_label(
+        self,
+        image_bytes: bytes,
+        filename: str | None = None,
+        content_type: str | None = None,
+    ) -> ExtractedLabel:
+        result = self.extracted[self.calls]
+        self.calls += 1
+        return result
+
+
+class SlowMockVisionService:
+    def __init__(self, extracted: ExtractedLabel, delay: float = 0.05) -> None:
+        self.extracted = extracted
+        self.delay = delay
+        self.calls = 0
+        self.active = 0
+        self.max_active = 0
+
+    async def extract_label(
+        self,
+        image_bytes: bytes,
+        filename: str | None = None,
+        content_type: str | None = None,
+    ) -> ExtractedLabel:
+        self.calls += 1
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        await asyncio.sleep(self.delay)
+        self.active -= 1
         return self.extracted
 
 
@@ -99,14 +139,14 @@ def provider_for(mock: MockVisionService):
     return lambda: mock
 
 
-def response_body(response: VerifyResponse | JSONResponse) -> dict:
-    if isinstance(response, VerifyResponse):
+def response_body(response: VerifyResponse | BatchVerifyResponse | JSONResponse) -> dict:
+    if isinstance(response, VerifyResponse | BatchVerifyResponse):
         return response.model_dump(mode="json")
     return json.loads(response.body)
 
 
-def response_status(response: VerifyResponse | JSONResponse) -> int:
-    if isinstance(response, VerifyResponse):
+def response_status(response: VerifyResponse | BatchVerifyResponse | JSONResponse) -> int:
+    if isinstance(response, VerifyResponse | BatchVerifyResponse):
         return 200
     return response.status_code
 
@@ -131,6 +171,21 @@ async def call_verify(
     )
 
 
+async def call_batch_verify(
+    mock,
+    *,
+    items: list[dict[str, str | None]] | None = None,
+    images: list[MockUploadFile] | None = None,
+) -> BatchVerifyResponse | JSONResponse:
+    values = items if items is not None else [form_data()]
+    upload_images = images if images is not None else [upload_file() for _ in values]
+    return await verify_batch_endpoint(
+        vision_service_provider=provider_for(mock),
+        images=upload_images,
+        items_json=json.dumps(values),
+    )
+
+
 @pytest.mark.anyio
 async def test_successful_verify_returns_full_verification_result() -> None:
     mock = MockVisionService()
@@ -143,6 +198,9 @@ async def test_successful_verify_returns_full_verification_result() -> None:
     assert len(body["verification"]["fields"]) == 7
     assert isinstance(body["latency_ms"], int)
     assert body["latency_ms"] >= 0
+    assert body["timings"]["request_total_ms"] >= 0
+    assert body["timings"]["image_read_ms"] >= 0
+    assert body["timings"]["compare_ms"] >= 0
     assert body["extracted_label"]["government_warning"] == CANONICAL_WARNING
     assert mock.calls == 1
 
@@ -235,6 +293,20 @@ async def test_unsupported_content_type_returns_415_and_does_not_call_vision() -
 
 
 @pytest.mark.anyio
+async def test_unreadable_image_bytes_return_400_and_do_not_call_vision() -> None:
+    mock = MockVisionService()
+
+    response = await call_verify(
+        mock,
+        image=upload_file(content=b"not really a jpeg", content_type="image/jpeg"),
+    )
+
+    assert response_status(response) == 400
+    assert response_body(response)["errors"]["image"] == "Image file could not be read."
+    assert mock.calls == 0
+
+
+@pytest.mark.anyio
 async def test_oversized_image_returns_413() -> None:
     mock = MockVisionService()
 
@@ -306,8 +378,15 @@ async def test_latency_is_logged_for_4xx(caplog) -> None:
 @pytest.mark.anyio
 async def test_slow_path_over_budget_logs_warning(caplog, monkeypatch) -> None:
     mock = MockVisionService()
-    ticks = iter([0.0, 5.25])
-    monkeypatch.setattr("app.api.verify.time.perf_counter", lambda: next(ticks))
+    ticks = iter([0.0, 0.0, 0.1, 5.25])
+
+    def fake_perf_counter() -> float:
+        try:
+            return next(ticks)
+        except StopIteration:
+            return 5.25
+
+    monkeypatch.setattr("app.api.verify.time.perf_counter", fake_perf_counter)
 
     with caplog.at_level(logging.WARNING, logger="app.api.verify"):
         response = await call_verify(mock, image=upload_file())
@@ -315,3 +394,170 @@ async def test_slow_path_over_budget_logs_warning(caplog, monkeypatch) -> None:
     assert response_status(response) == 200
     assert response_body(response)["latency_ms"] == 5250
     assert any("exceeded_budget=True" in message for message in caplog.messages)
+
+
+@pytest.mark.anyio
+async def test_batch_size_one_returns_summary_and_result() -> None:
+    mock = MockVisionService()
+
+    response = await call_batch_verify(mock)
+    body = response_body(response)
+
+    assert response_status(response) == 200
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["needs_review"] == 0
+    assert body["summary"]["total"] == 1
+    assert body["results"][0]["index"] == 0
+    assert body["results"][0]["status"] == "PASS"
+    assert body["results"][0]["verification"]["verdict"] == "PASS"
+    assert body["results"][0]["timings"]["image_read_ms"] >= 0
+    assert body["results"][0]["timings"]["compare_ms"] >= 0
+    assert mock.calls == 1
+
+
+@pytest.mark.anyio
+async def test_batch_mixed_results_have_correct_summary_counts() -> None:
+    mock = SequencedMockVisionService(
+        [
+            matching_extracted_label(),
+            matching_extracted_label(brand_name="Wrong Brand"),
+        ]
+    )
+
+    response = await call_batch_verify(mock, items=[form_data(), form_data()])
+    body = response_body(response)
+
+    assert response_status(response) == 200
+    assert body["summary"]["passed"] == 1
+    assert body["summary"]["needs_review"] == 1
+    assert body["summary"]["total"] == 2
+    assert [item["index"] for item in body["results"]] == [0, 1]
+    assert body["results"][0]["status"] == "PASS"
+    assert body["results"][1]["status"] == "NEEDS_REVIEW"
+
+
+@pytest.mark.anyio
+async def test_batch_one_invalid_item_does_not_block_valid_items() -> None:
+    mock = SequencedMockVisionService([matching_extracted_label(), matching_extracted_label()])
+    invalid = form_data()
+    invalid["producer"] = ""
+
+    response = await call_batch_verify(
+        mock,
+        items=[form_data(), invalid, form_data()],
+        images=[upload_file(), upload_file(), upload_file()],
+    )
+    body = response_body(response)
+
+    assert response_status(response) == 200
+    assert body["summary"]["passed"] == 2
+    assert body["summary"]["needs_review"] == 1
+    assert body["summary"]["total"] == 3
+    assert body["results"][1]["status"] == "NEEDS_REVIEW"
+    assert body["results"][1]["errors"]["producer"] == "This field cannot be empty."
+    assert mock.calls == 2
+
+
+@pytest.mark.anyio
+async def test_batch_item_unsupported_file_type_is_isolated() -> None:
+    mock = SequencedMockVisionService([matching_extracted_label(), matching_extracted_label()])
+
+    response = await call_batch_verify(
+        mock,
+        items=[form_data(), form_data(), form_data()],
+        images=[
+            upload_file(),
+            upload_file(content=b"not an image", content_type="text/plain"),
+            upload_file(),
+        ],
+    )
+    body = response_body(response)
+
+    assert response_status(response) == 200
+    assert body["summary"]["passed"] == 2
+    assert body["summary"]["needs_review"] == 1
+    assert body["results"][1]["errors"]["image"] == "Unsupported file type."
+    assert mock.calls == 2
+
+
+@pytest.mark.anyio
+async def test_batch_item_vision_exception_is_isolated() -> None:
+    mock = MockVisionService(error=RuntimeError("provider boom"))
+
+    response = await call_batch_verify(mock, items=[form_data(), form_data()])
+    body = response_body(response)
+
+    assert response_status(response) == 200
+    assert body["summary"]["passed"] == 0
+    assert body["summary"]["needs_review"] == 2
+    assert body["summary"]["total"] == 2
+    assert body["results"][0]["errors"]["server"] == "Verification failed for this label."
+    assert "provider boom" not in str(body)
+
+
+@pytest.mark.anyio
+async def test_batch_mismatched_image_and_data_counts_returns_400() -> None:
+    mock = MockVisionService()
+
+    response = await call_batch_verify(mock, items=[form_data(), form_data()], images=[upload_file()])
+
+    assert response_status(response) == 400
+    assert response_body(response)["errors"]["items_json"] == "Image count and application data count must match."
+    assert mock.calls == 0
+
+
+@pytest.mark.anyio
+async def test_batch_more_than_five_labels_returns_400() -> None:
+    mock = MockVisionService()
+
+    response = await call_batch_verify(
+        mock,
+        items=[form_data() for _ in range(6)],
+        images=[upload_file() for _ in range(6)],
+    )
+
+    assert response_status(response) == 400
+    assert response_body(response)["errors"]["images"] == "Maximum batch size is 5."
+    assert mock.calls == 0
+
+
+@pytest.mark.anyio
+async def test_batch_total_upload_over_25mb_returns_413() -> None:
+    mock = MockVisionService()
+
+    response = await call_batch_verify(
+        mock,
+        items=[form_data(), form_data(), form_data(), form_data()],
+        images=[upload_file(content=b"x" * (7 * 1024 * 1024)) for _ in range(4)],
+    )
+
+    assert response_status(response) == 413
+    assert response_body(response)["errors"]["images"] == "Total upload is larger than 25 MB."
+    assert mock.calls == 0
+
+
+@pytest.mark.anyio
+async def test_batch_slow_service_runs_concurrently() -> None:
+    mock = SlowMockVisionService(matching_extracted_label())
+
+    response = await call_batch_verify(
+        mock,
+        items=[form_data(), form_data(), form_data()],
+        images=[upload_file(), upload_file(), upload_file()],
+    )
+
+    assert response_status(response) == 200
+    assert response_body(response)["summary"]["passed"] == 3
+    assert mock.calls == 3
+    assert mock.max_active > 1
+
+
+def test_batch_item_status_rejects_unexpected_values() -> None:
+    with pytest.raises(ValidationError):
+        BatchItemResult(
+            index=0,
+            filename="label.jpg",
+            status="ERROR",
+            latency_ms=1,
+            errors={},
+        )

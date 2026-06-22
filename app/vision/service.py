@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 from pydantic import ValidationError
@@ -63,6 +65,12 @@ def null_extracted_label() -> ExtractedLabel:
     return ExtractedLabel()
 
 
+@dataclass(frozen=True)
+class VisionExtractionResult:
+    label: ExtractedLabel
+    timings: dict[str, int | str | bool | None]
+
+
 def build_extracted_label_schema() -> dict[str, Any]:
     properties = {
         field: {"type": ["string", "null"]}
@@ -99,12 +107,41 @@ class VisionService:
         filename: str | None = None,
         content_type: str | None = None,
     ) -> ExtractedLabel:
+        result = await self.extract_label_with_metrics(
+            image_bytes,
+            filename=filename,
+            content_type=content_type,
+        )
+        return result.label
+
+    async def extract_label_with_metrics(
+        self,
+        image_bytes: bytes,
+        filename: str | None = None,
+        content_type: str | None = None,
+    ) -> VisionExtractionResult:
+        total_start = time.perf_counter()
+        preprocess_start = time.perf_counter()
         try:
             prepared = prepare_image(image_bytes)
         except ImagePreprocessingError:
             logger.warning("Vision extraction skipped because input is not a readable image.")
-            return null_extracted_label()
+            return VisionExtractionResult(
+                label=null_extracted_label(),
+                timings={
+                    "preprocess_ms": _elapsed_ms(preprocess_start),
+                    "vision_ms": 0,
+                    "prepared_image_bytes": None,
+                    "prepared_image_width": None,
+                    "prepared_image_height": None,
+                    "model": self.model,
+                    "vision_detail": self.detail,
+                    "vision_extraction_failed": True,
+                    "vision_total_ms": _elapsed_ms(total_start),
+                },
+            )
 
+        vision_start = time.perf_counter()
         try:
             result = await self.client.extract_structured_label(
                 image_bytes=prepared.data,
@@ -115,9 +152,39 @@ class VisionService:
             )
         except Exception as exc:
             logger.warning("Vision extraction failed with provider/client error: %s", type(exc).__name__)
-            return null_extracted_label()
+            return VisionExtractionResult(
+                label=null_extracted_label(),
+                timings={
+                    "preprocess_ms": _elapsed_ms(preprocess_start, end=vision_start),
+                    "vision_ms": _elapsed_ms(vision_start),
+                    "prepared_image_bytes": len(prepared.data),
+                    "prepared_image_width": prepared.width,
+                    "prepared_image_height": prepared.height,
+                    "model": self.model,
+                    "vision_detail": self.detail,
+                    "vision_extraction_failed": True,
+                    "vision_total_ms": _elapsed_ms(total_start),
+                },
+            )
 
-        return _parse_extracted_label(result.structured_data, result.raw_json)
+        return VisionExtractionResult(
+            label=_parse_extracted_label(result.structured_data, result.raw_json),
+            timings={
+                "preprocess_ms": _elapsed_ms(preprocess_start, end=vision_start),
+                "vision_ms": _elapsed_ms(vision_start),
+                "prepared_image_bytes": len(prepared.data),
+                "prepared_image_width": prepared.width,
+                "prepared_image_height": prepared.height,
+                "model": self.model,
+                "vision_detail": self.detail,
+                "vision_extraction_failed": False,
+                "vision_total_ms": _elapsed_ms(total_start),
+            },
+        )
+
+
+def _elapsed_ms(start: float, *, end: float | None = None) -> int:
+    return int(((end if end is not None else time.perf_counter()) - start) * 1000)
 
 
 def _parse_extracted_label(

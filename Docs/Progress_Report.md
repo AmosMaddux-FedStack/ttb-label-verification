@@ -2,9 +2,27 @@
 
 ## Current Status
 
-Phase 0 is complete and deployed. Phase 1 comparison engine is implemented. Phase 2 VisionService
-is implemented, mock-tested, and confirmed against a real sample image by the user. Phase 3
-`POST /verify` is implemented and tested locally. Phase 4 single-label frontend is implemented.
+Phases 0 through 7 are implemented through the current documentation/readiness pass.
+
+- Phase 0: FastAPI health app and hello frontend deployed.
+- Phase 1: deterministic comparison engine implemented.
+- Phase 2: `VisionService` implemented and mock-tested.
+- Phase 3: single-label `POST /verify` implemented.
+- Phase 4: single-label UI implemented.
+- Phase 5: unified multi-label UI and concurrent `POST /verify/batch` implemented.
+- Phase 6: latency, validation, imperfect-image handling, and accessibility hardening implemented.
+- Phase 7: README and secret audit completed.
+
+Follow-up hardening pass completed:
+
+- Phase 1 fuzzy matching now uses `rapidfuzz.fuzz.token_sort_ratio` as specified in `Docs/Plan.md`.
+- API response models use stricter status literals and safe default factories for timing maps.
+- Added real FastAPI multipart tests for `/verify` and `/verify/batch`.
+- Added generated imperfect-image tests for blurry, cropped, glare-like, non-label, and non-image paths.
+- Added Playwright frontend smoke tests for core single/batch UI behavior, plain-English errors,
+  explicit `View details`, and mobile overflow.
+- Added `scripts/readiness_check.py` for health/page checks and optional manually supplied live
+  single-label verification.
 
 Live app:
 
@@ -12,14 +30,27 @@ Live app:
 https://ttb-label-verification-production-b67a.up.railway.app
 ```
 
-Verified endpoints:
+Latest verified live behavior:
 
 ```text
-GET /        -> 200, frontend HTML loads
-GET /health  -> 200, {"status":"ok"}
+GET /                -> 200, frontend HTML loads
+GET /health          -> 200, {"status":"ok"}
+POST /verify         -> valid single label returns PASS under 5 seconds
+POST /verify         -> case-only government-warning mismatch returns NEEDS_REVIEW
+POST /verify/batch   -> 3-label batch returns correct summary counts and item results
 ```
 
-The frontend calls same-origin `/health` and displays the health response on the page.
+Final Phase 7 live audit on June 22, 2026:
+
+```text
+Health: PASS, HTTP 200 {"status":"ok"}
+Single valid label: PASS, verdict=PASS, latency=1692 ms
+Warning exact/case mismatch: PASS, verdict=NEEDS_REVIEW, warning=FAIL, latency=1421 ms
+Imperfect image: PASS, verdict=PASS, latency=2316 ms
+Batch: PASS, summary={passed: 2, needs_review: 1, total: 3, latency_ms: 2412}
+```
+
+The frontend uses same-origin API paths and the backend remains stateless.
 
 ## Repository
 
@@ -103,10 +134,16 @@ Service ID:
 823abc67-f4c0-4298-a0c9-414ad3e2dce2
 ```
 
-Deployment ID:
+Initial Phase 0 deployment ID:
 
 ```text
 ad4dc8d5-fbed-4aa2-bf64-e90a6e44d41e
+```
+
+Latest verified application deployment ID:
+
+```text
+e3f383e2-eb76-4ef5-8eff-7e332f6b4430
 ```
 
 Public domain:
@@ -498,6 +535,184 @@ Latest local result:
 82 passed in 0.57s
 ```
 
+## Phase 5 Unified Multi-Label Batch Flow
+
+Phase 5 removes the separate single/batch mode split and uses one page with one or more label cards.
+One card behaves like single-label mode. Two to five cards behave like batch mode.
+
+Files changed:
+
+```text
+app/api/models.py
+app/api/verify.py
+app/static/index.html
+app/static/app.js
+app/static/styles.css
+tests/test_verify_endpoint.py
+Docs/Plan.md
+```
+
+Implemented backend behavior:
+
+- Added `POST /verify/batch`.
+- Accepts repeated `images` plus an `items_json` array.
+- Pairs each image with the application-data object at the same index.
+- Enforces batch size maximum of `5`.
+- Enforces total batch upload maximum of `25 MB`.
+- Processes labels concurrently with `asyncio.gather` and a bounded semaphore.
+- Preserves per-item error isolation: one invalid label returns one item-level `NEEDS_REVIEW` and
+  does not fail the whole batch.
+- Returns summary counts:
+  - `passed`
+  - `needs_review`
+  - `total`
+  - `latency_ms`
+- Returns individual results for drill-down.
+
+Implemented frontend behavior:
+
+- The page starts with one label card.
+- `Add Label` adds another card up to five total cards.
+- Multiple cards submit to `/verify/batch`.
+- One card submits to `/verify`.
+- Shows a progress indicator while labels are being checked.
+- Shows batch summary counts.
+- Keeps individual results viewable for each label.
+
+Phase 5 local verification:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache UV_PYTHON_INSTALL_DIR=/tmp/uv-python uv run pytest
+node --check app/static/app.js
+```
+
+Live Phase 5-style batch check:
+
+```text
+3-label batch returned HTTP 200
+summary={passed: 2, needs_review: 1, total: 3, latency_ms: 2412}
+```
+
+## Phase 6 Hardening, Latency, Validation, And Accessibility
+
+Phase 6 adds no new feature workflow. It hardens the existing single and batch paths.
+
+Files changed:
+
+```text
+app/api/models.py
+app/api/verify.py
+app/static/styles.css
+app/vision/preprocessing.py
+app/vision/service.py
+tests/test_verify_endpoint.py
+tests/test_vision_service.py
+Docs/Plan.md
+```
+
+Implemented behavior:
+
+- Tuned image preprocessing to a `1400px` max long edge and JPEG quality `76`.
+- Added timing metadata to single-label and batch item responses.
+- Timing metadata includes preprocessing, model call, prepared image size, comparison, total
+  request time, model name, detail level, verdict, and failure count.
+- Validates that uploaded image bytes are readable images, not just that the content type is allowed.
+- Unreadable image bytes return a plain `400` response instead of reaching vision extraction.
+- Preserves existing limits:
+  - single image max: `8 MB`
+  - batch total image bytes max: `25 MB`
+  - batch size max: `5`
+  - supported image types: JPEG, PNG, WebP
+- Vision failures and imperfect images degrade into partial/null extraction and normal
+  `NEEDS_REVIEW` behavior instead of stack traces.
+- UI accessibility pass increased base font size, strengthened labels and messages, and added
+  clearer focus states.
+
+Phase 6 local verification:
+
+```text
+92 passed in 0.58s
+node --check app/static/app.js passed
+```
+
+Phase 6 live latency audit:
+
+```text
+single-label count: 8
+min: 1001 ms
+max: 1453 ms
+mean: 1203.4 ms
+p50: 1184.5 ms
+batch latency: 1462 ms
+```
+
+The deployed app met the project requirement that single-label checks complete under five seconds.
+
+## Phase 7 README And Secret Audit
+
+Phase 7 updates project documentation and runs a final readiness audit.
+
+Files changed:
+
+```text
+README.md
+Docs/Plan.md
+Docs/Progress_Report.md
+```
+
+README now covers:
+
+- live URL and health URL,
+- overview,
+- seven verification fields,
+- matching rules,
+- verdict rule,
+- local setup with `uv`,
+- run and test commands,
+- API endpoints,
+- Railway deployment notes,
+- tools and libraries,
+- accessibility/usability notes,
+- assumptions,
+- limitations,
+- secret handling.
+
+Secret audit checks run:
+
+```bash
+git ls-files | rg '(^|/)\.env($|\.|-)'
+git check-ignore .env
+git check-ignore tests/test_images/
+git grep -nE 'sk-[A-Za-z0-9_-]+|sk-proj-[A-Za-z0-9_-]+|OPENAI_API_KEY\s*=.+|RAILWAY_TOKEN\s*=.+|api[_-]?key\s*=|secret\s*=|token\s*='
+rg --hidden --glob '!.git' --glob '!tests/test_images/**' -n 'sk-[A-Za-z0-9_-]+|sk-proj-[A-Za-z0-9_-]+|OPENAI_API_KEY\s*=.+|RAILWAY_TOKEN\s*=.+|api[_-]?key\s*=|secret\s*=|token\s*='
+git log --all -G 'sk-[A-Za-z0-9_-]+|sk-proj-[A-Za-z0-9_-]+|OPENAI_API_KEY\s*=.+|RAILWAY_TOKEN\s*=.+|api[_-]?key\s*=|secret\s*=|token\s*=' --oneline -- . ':!tests/test_images'
+```
+
+Secret audit result:
+
+- `.env.example` is the only tracked env-style file.
+- `.env` is ignored.
+- `tests/test_images/` is ignored.
+- Current-tree matches are placeholders, documentation, or code reading environment variable names.
+- History matches were reviewed and did not contain real key values.
+
+Final Phase 7 local verification:
+
+```text
+92 passed in 0.65s
+node --check app/static/app.js passed
+```
+
+Final Phase 7 live verification on June 22, 2026:
+
+```text
+Health: PASS, HTTP 200 {"status":"ok"}
+Single valid label: PASS, verdict=PASS, latency=1692 ms
+Warning exact/case mismatch: PASS, verdict=NEEDS_REVIEW, warning=FAIL, latency=1421 ms
+Imperfect image: PASS, verdict=PASS, latency=2316 ms
+Batch: PASS, summary={passed: 2, needs_review: 1, total: 3, latency_ms: 2412}
+```
+
 ## Important Decisions
 
 - One FastAPI service serves both the API and the static frontend.
@@ -551,12 +766,13 @@ export OPENAI_API_KEY="set-this-locally-only"
 uv run python scripts/run_sample_extraction.py
 ```
 
-## Next Phase Notes
+## Current Next Notes
 
-Phase 4 has not started. The likely next scope is frontend integration for single-image verification
-or the required batch-upload workflow, depending on the approved plan.
+The implemented proof of concept now includes deploy-first setup, deterministic comparison, vision
+extraction, single-label verification, unified multi-label batch verification, hardening, README
+documentation, and a clean secret audit.
 
-Project rules still apply for the next phase:
+Future work should stay inside the standing project rules:
 
 - Single-label result under 5 seconds.
 - Batch upload is required.

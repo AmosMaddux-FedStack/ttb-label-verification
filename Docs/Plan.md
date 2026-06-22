@@ -163,7 +163,7 @@ After deploy:
   Railway free/trial deployment is blocked by account or billing constraints.
 
 
-## Phase 1 Plan: Comparison Engine
+# Phase 1 Plan: Comparison Engine
 
 ## Summary
 
@@ -842,3 +842,402 @@ Review result: the earlier plan was close, but a few items needed tightening for
 - Phase 4 remains single-label only.
 - Batch upload is still required for the full project but belongs to a later phase.
 - Plain HTML/CSS/JS remains the frontend choice for speed and simplicity.
+
+
+
+# Final Phase 5 Plan: Unified Multi-Label Verification
+
+## Summary
+
+Build one unified verification page and one batch-capable endpoint. The page starts with one label card; adding more cards turns the same flow into batch verification. There is no separate mode selector.
+
+`POST /verify/batch` accepts 1 to 5 image + application-data pairs, processes them concurrently with a bounded limit, and returns a summary plus individually viewable results for every submitted label.
+
+Review confirmed:
+- One bad label does not fail the whole batch.
+- Concurrency is bounded to control latency, API rate pressure, and cost.
+- Summary counts are derived from per-item results.
+- Every item remains individually viewable.
+
+## API Design
+
+Endpoint: `POST /verify/batch`
+
+Request: `multipart/form-data`
+
+- `images`: repeated files, one per label.
+- `items_json`: JSON array of application-data objects.
+- Pairing rule: `images[i]` pairs with `items_json[i]`.
+- Batch size: minimum `1`, maximum `5`.
+- Allowed image types: JPEG, PNG, WebP.
+- Max per-image size: `8 MB`.
+- Max total image bytes: `25 MB`.
+- Each item requires:
+  - `brand_name`
+  - `product_class`
+  - `producer`
+  - `country_of_origin`
+  - `abv`
+  - `net_contents`
+  - `government_warning`
+
+Response:
+
+```json
+{
+  "summary": {
+    "passed": 2,
+    "needs_review": 1,
+    "total": 3,
+    "latency_ms": 4200
+  },
+  "results": [
+    {
+      "index": 0,
+      "filename": "label-1.jpg",
+      "status": "PASS",
+      "verification": {},
+      "extracted_label": {},
+      "latency_ms": 1200,
+      "errors": {}
+    }
+  ]
+}
+```
+
+Top-level errors only happen for malformed batch structure:
+- empty batch
+- more than 5 labels
+- invalid `items_json`
+- mismatched image/data counts
+- total upload too large
+
+Per-item errors are isolated:
+- unsupported file type
+- oversized individual image
+- missing/empty fields
+- extraction failure
+- unexpected per-item processing failure
+
+A per-item error returns that item with `status: "NEEDS_REVIEW"` and human-readable `errors`, while other valid items still process and return results.
+
+## Backend Behavior
+
+- Reuse existing single-label validation and verification logic where possible.
+- Add batch response models:
+  - `BatchSummary`
+  - `BatchItemResult`
+  - `BatchVerifyResponse`
+- Process valid items with `asyncio.gather`.
+- Bound concurrency with `asyncio.Semaphore(5)`.
+- Never allow one item exception to escape and fail the whole batch.
+- Measure:
+  - total batch `summary.latency_ms`
+  - each item `latency_ms`
+- Compute summary from item statuses:
+  - `passed = count(status == "PASS")`
+  - `needs_review = count(status == "NEEDS_REVIEW")`
+  - `total = len(results)`
+- Preserve result order to match input order.
+- Return no stack traces, provider details, exception names, or raw model errors.
+
+## Frontend Design
+
+Use one centralized page for both single-label and batch verification.
+
+- Show one centered label card by default.
+- Each card contains:
+  - `Label 1`, `Label 2`, etc.
+  - image picker and preview
+  - the seven application fields
+  - remove button only when more than one card exists
+- Beneath cards:
+  - `Add Label` button
+  - primary submit button:
+    - `Check Label` for one card
+    - `Check All Labels` for multiple cards
+- Allow up to 5 cards.
+- At 5 cards, disable `Add Label` and show `Maximum 5 labels at a time.`
+- No mode selector.
+- One card is effectively single-label mode.
+- Multiple cards are batch mode.
+- Frontend may always call `POST /verify/batch`, even for one card.
+- Keep `POST /verify` for API compatibility.
+
+Loading/progress:
+- Disable all controls while submitting.
+- If processing takes more than 700ms, show:
+  - `Checking 1 label. This may take a few seconds.`
+  - or `Checking 3 labels. This may take a few seconds.`
+- Show an elapsed seconds counter or indeterminate progress bar.
+
+Results:
+- For one item, show the prominent single result view.
+- For multiple items, show summary counts:
+  - approved
+  - needs review
+  - total
+- Each item appears in its own result card.
+- Each result card shows verdict, filename/label number, latency, and a `View details` control.
+- Item details show per-field results with failures first and expected-vs-found visible.
+- Per-item errors are shown inside that item’s result card in plain English.
+
+## Test Plan
+
+Backend tests with mocked `VisionService`:
+
+- Batch size 1 works.
+- Valid batch of 2 passing labels returns `passed: 2`, `needs_review: 0`, `total: 2`.
+- Mixed pass/fail batch returns correct summary counts.
+- Result order matches input order.
+- One invalid item does not block valid items.
+- Unsupported file type produces item-level `NEEDS_REVIEW`.
+- Oversized individual image produces item-level `NEEDS_REVIEW`.
+- Missing item field produces item-level `NEEDS_REVIEW`.
+- Extraction exception for one item produces item-level `NEEDS_REVIEW`.
+- Empty batch returns top-level `400`.
+- More than 5 labels returns top-level `400`.
+- Mismatched image/data counts returns top-level `400`.
+- Total upload over 25 MB returns top-level `413`.
+- Mocked slow service proves bounded concurrent processing.
+- No real OpenAI calls occur.
+
+Frontend tests:
+
+- Page starts with one label card and no mode selector.
+- `Add Label` adds cards up to 5.
+- Remove button appears only when more than one card exists.
+- Submit text changes between `Check Label` and `Check All Labels`.
+- Submit disabled until all visible cards are complete.
+- Frontend sends `images` and `items_json` in matching order.
+- Loading message uses correct singular/plural count.
+- Summary counts render correctly.
+- Every item result is individually viewable.
+- Per-item errors show in the affected card only.
+- Failed fields show expected-vs-found without hunting.
+
+## Assumptions
+
+- Batch limit remains 5 for Phase 5.
+- `POST /verify/batch` supports 1 to 5 items.
+- Batch processing is request/response only: no database, job queue, WebSocket, or server-side persistence.
+- The frontend remains plain HTML/CSS/JS.
+
+# Final Phase 6 Plan: Hardening, Measurement, And Accessibility
+
+## Summary
+
+Phase 6 adds no new user-facing features. It hardens the existing single-label and batch flows by
+measuring real latency, tuning image/model settings only after measurement, confirming imperfect
+images degrade to partial/null extraction, tightening validation/error messages, and doing an
+accessibility pass for the 70+ user bar.
+
+Primary success criterion: single-label verification on the deployed Railway app is reliably under
+`5 seconds` while preserving exact government-warning comparison and clear `NEEDS_REVIEW`
+degradation for poor inputs.
+
+## Full Checklist Review
+
+Every item from the brief is covered:
+
+- Valid label: covered by endpoint/API tests where all seven fields pass and UI shows `APPROVED`.
+- Mismatches: covered by one-wrong-field tests for all seven fields and expected-vs-found display.
+- Case-only: covered by fuzzy string tests for ordinary fields and strict warning case tests.
+- ABV normalization: covered by numeric ABV tests such as equivalent percentages and out-of-tolerance values.
+- Units normalization: covered by net-contents tests for `ml`, `L`, `cl`, and fluid-ounce equivalents.
+- Missing warning: covered by null/missing extracted warning returning field `FAIL` and `NEEDS_REVIEW`.
+- Wrong-caps warning: covered by title-case/lowercase government-warning failures.
+- Correct warning: covered by exact all-caps/full-warning pass cases.
+- Imperfect image: covered by blurry/cropped/glare/non-label degradation checks returning partial/null data without uncaught exceptions.
+- Wrong file type: covered by validation tests returning plain-English errors and no model call.
+- Empty submit: covered by missing image plus missing/blank field validation tests.
+- Batch summary: covered by mixed pass/fail batch tests with `passed`, `needs_review`, and `total` counts.
+- Single-label speed: covered by deployed `/verify` measurement, timing logs, and target thresholds below.
+
+## Measurements And Targets
+
+Add structured timing for each single-label request:
+
+- `request_total_ms`: full `/verify` request time.
+- `image_read_ms`: upload read time.
+- `preprocess_ms`: EXIF correction, resize, and JPEG encode.
+- `prepared_image_bytes`: bytes sent to the model after preprocessing.
+- `prepared_image_width` and `prepared_image_height`.
+- `vision_ms`: OpenAI vision call duration.
+- `compare_ms`: deterministic comparison duration.
+- `model`: active `VISION_MODEL`.
+- `vision_detail`: active detail level.
+- `verdict` and `failure_count`.
+
+Target numbers:
+
+- Single-label p50 total latency: `< 3.0s`.
+- Single-label p90 total latency: `< 5.0s`.
+- Single-label p95 total latency: tracked and targeted at `< 6.0s`; not considered reliable until p90 is under `5.0s`.
+- Preprocessing p90: `< 300ms`.
+- Comparison p90: `< 50ms`.
+- Prepared image size p90: `< 1.5 MB`.
+- Vision call p90: `< 4.3s`, leaving budget for upload, preprocessing, and comparison.
+- Batch of 3 labels: total latency should be clearly less than sequential per-item total, confirming concurrency remains active.
+
+Tune only after baseline measurement:
+
+- Test preprocessing long edge values: current `1600px`, then `1400px`, then `1200px`.
+- Test JPEG quality values: current `82`, then `76`, then `70`.
+- Test model tier only if needed: current `gpt-5.4-mini`, then `gpt-5.4-nano` as a speed/cost candidate.
+- Keep a lower-quality/lower-tier setting only if the seven-field extraction remains acceptable, especially the government warning.
+
+## Hardening Changes
+
+- Add timing instrumentation around upload read, preprocessing, model call, comparison, and total request handling.
+- Keep `/verify` and `/verify/batch` user-facing errors plain English; never expose stack traces, exception names, provider text, model names, or API-key details.
+- Validate that image bytes are actually readable images, not only that content type is allowed.
+- Preserve current limits unless measurement proves they must change:
+  - single image max: `8 MB`
+  - batch size max: `5`
+  - batch total image bytes max: `25 MB`
+  - allowed types: JPEG, PNG, WebP
+- Confirm bad images degrade safely:
+  - blurry image -> partial/null fields and `NEEDS_REVIEW`
+  - cropped image -> partial/null fields and `NEEDS_REVIEW`
+  - angled/rotated image -> partial/null fields and `NEEDS_REVIEW`
+  - glare/overexposed image -> partial/null fields and `NEEDS_REVIEW`
+  - non-label image -> all-null or mostly-null fields and `NEEDS_REVIEW`
+  - unreadable/non-image bytes -> validation/preprocessing failure with plain error or all-null extraction, never a crash
+- Keep batch per-item isolation: one bad image/data pair returns one item-level `NEEDS_REVIEW` and does not fail the whole batch.
+
+Plain-English error targets:
+
+- Missing image: `Please choose a label photo.`
+- Unsupported type: `Please choose a JPG, PNG, or WebP photo.`
+- Too large: `The photo is too large. Please choose one under 8 MB.`
+- Missing field: `Please fill in Brand name.`
+- Batch too large: `Please check no more than 5 labels at a time.`
+- Service failure: `Something went wrong while checking the label. Please try again.`
+
+## Accessibility Pass
+
+Audit and adjust the existing plain HTML/CSS/JS UI:
+
+- Base body/form text target: `20px`.
+- Labels target: `20px+`, bold, visible.
+- Inputs/buttons minimum height: `50px`; tap target minimum: `48px`.
+- Primary action remains full-width and high contrast.
+- Text contrast target: WCAG AA `4.5:1` for normal text, `3:1` for large text and UI boundaries.
+- Focus states remain thick and obvious for inputs, selects, file picker, buttons, and result drill-down summaries.
+- Every input has a visible label; no placeholder-only instructions.
+- Error panel receives focus after an error.
+- Batch details remain keyboard reachable through native `<details>/<summary>`.
+- Check common widths: `375px`, `768px`, and `1280px`; no overlapping text, clipped buttons, or horizontal scrolling from form controls.
+
+## Test Plan
+
+- Add timing tests/log assertions that all timing keys are present and numeric.
+- Add preprocessing size tests for large generated images and selected long-edge/quality settings.
+- Add imperfect-image fixture tests for blurry, cropped, glare, non-label, and non-image inputs.
+- Add validation tests for wrong file type, oversized files, empty submit, blank fields, malformed batch data, and too many batch labels.
+- Preserve and expand comparison tests for valid label, mismatches, case-only ordinary fields, ABV normalization, unit normalization, and government-warning exactness.
+- Add frontend tests or smoke checks for plain-English errors, visible labels, button disabled/enabled behavior, summary counts, and opening individual batch results.
+- Measure deployed single-label latency against the real test images and record p50/p90/p95 before and after any tuning.
+
+## Assumptions
+
+- Phase 6 introduces no new features, no database, no queue, and no new UI workflow.
+- Railway production URL is the source of truth for latency targets.
+- Batch remains capped at 5 labels.
+- Government warning remains exact and case-sensitive; hardening must not normalize it.
+
+# Phase 7 Plan: Final Readiness, README, And Secret Audit
+
+## Summary
+
+Phase 7 is documentation and readiness work only. It does not add product features. The goal is to
+make sure the repo, README, deployed app, and secret handling are in a clean final state.
+
+## Readiness Gates
+
+- Repository has the expected code, tests, docs, lockfile, and deployment config.
+- Live Railway URL is functional:
+  - `/` loads the label verification UI.
+  - `/health` returns `{"status":"ok"}`.
+  - Single-label verification works.
+  - Batch verification works for up to five labels.
+  - Warning exact-match behavior is demonstrable.
+  - Imperfect images return a normal result or readable error, never a stack trace.
+- Local tests pass with:
+  ```bash
+  uv run pytest
+  ```
+- README is complete and reviewer-friendly.
+- Secret audit is clean:
+  - no `.env` committed,
+  - no OpenAI API key committed,
+  - no Railway token committed,
+  - `.env.example` contains placeholder names only,
+  - runtime secrets live only in environment variables.
+
+## README Outline
+
+The README should include:
+
+- Live demo URL and `/health` URL.
+- Brief overview of what the app does.
+- The seven verification fields.
+- Matching rules:
+  - fuzzy token-sort for brand, product type, and producer,
+  - synonym-normalized exact match for country,
+  - numeric normalization for ABV,
+  - unit normalization for bottle size,
+  - exact case-sensitive match for government warning.
+- Verdict rule: any failed field means `NEEDS REVIEW`; all fields passing means `APPROVED`.
+- Local setup using `uv`.
+- Local run command.
+- Test command.
+- API endpoint summaries for `/health`, `/verify`, and `/verify/batch`.
+- Railway deployment notes and required environment variables.
+- Tools and libraries used.
+- Accessibility/usability notes.
+- Assumptions and limitations.
+- Secret-handling policy.
+
+## Secret Audit
+
+Run these checks:
+
+```bash
+git ls-files | rg '(^|/)\.env($|\.|-)'
+git check-ignore .env
+git check-ignore tests/test_images/
+git grep -nE 'sk-[A-Za-z0-9_-]+|sk-proj-[A-Za-z0-9_-]+|OPENAI_API_KEY\s*=.+|RAILWAY_TOKEN\s*=.+|api[_-]?key\s*=|secret\s*=|token\s*='
+rg --hidden --glob '!.git' --glob '!tests/test_images/**' -n 'sk-[A-Za-z0-9_-]+|sk-proj-[A-Za-z0-9_-]+|OPENAI_API_KEY\s*=.+|RAILWAY_TOKEN\s*=.+|api[_-]?key\s*=|secret\s*=|token\s*='
+git log --all -G 'sk-[A-Za-z0-9_-]+|sk-proj-[A-Za-z0-9_-]+|OPENAI_API_KEY\s*=.+|RAILWAY_TOKEN\s*=.+|api[_-]?key\s*=|secret\s*=|token\s*=' --oneline -- . ':!tests/test_images'
+```
+
+Expected results:
+
+- `git ls-files` should show `.env.example` only.
+- `.env` should be ignored.
+- `tests/test_images/` should be ignored.
+- Grep matches should be placeholders, documentation, or code that reads environment variable names.
+- History matches should be reviewed manually to confirm no real key value was ever committed.
+
+If there is any evidence that a real key was committed at any point, rotate that key before sharing
+the repo.
+
+## Final Live Checks
+
+Run one clean deployed pass against the Railway URL:
+
+- `GET /health` returns `200` and `{"status":"ok"}`.
+- A valid single label returns `PASS` / `APPROVED`.
+- A case-only government-warning mismatch returns `NEEDS_REVIEW` with the warning field failing.
+- An imperfect image returns a normal verification result or controlled readable error.
+- A three-label batch returns correct summary counts and individual item results.
+- Single-label latency remains under five seconds.
+
+## Assumptions
+
+- Phase 7 does not change verification behavior.
+- Documentation should describe the current implemented system, not future features.
+- Local real-image sanity files under `tests/test_images/` remain ignored and are not part of the
+  committed test suite.

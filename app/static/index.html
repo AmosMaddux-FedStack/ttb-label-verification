@@ -11,7 +11,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">TTB Label Verification</p>
-          <h1>Single Label Check</h1>
+          <h1>Label Check</h1>
         </div>
         <div id="health-badge" class="health-badge pending" role="status" aria-live="polite">
           Checking backend
@@ -21,137 +21,20 @@
       <section id="message" class="message" hidden tabindex="-1" aria-live="polite"></section>
 
       <form id="verify-form" class="verify-form">
-        <div class="form-layout">
-          <section class="form-section photo-section" aria-labelledby="upload-title">
-            <h2 id="upload-title">Label photo</h2>
-            <label class="file-picker">
-              <span id="file-name">Choose label photo</span>
-              <input id="image" name="image" type="file" accept="image/jpeg,image/png,image/webp" required>
-            </label>
-            <img id="image-preview" class="image-preview" alt="">
-          </section>
-
-          <section class="form-section data-section" aria-labelledby="data-title">
-            <h2 id="data-title">Application Data</h2>
-            <div class="field-stack">
-              <div class="field-row" data-field-row="brand_name">
-                <label for="brand-name">Brand name</label>
-                <input id="brand-name" name="brand_name" autocomplete="organization" required>
-                <div class="inline-result pending" data-result-for="brand_name" aria-live="polite">
-                  <span class="result-status">Not checked</span>
-                  <span class="result-value">Found on label will appear here.</span>
-                  <span class="result-message"></span>
-                </div>
-              </div>
-
-              <div class="field-row" data-field-row="product_class">
-                <label for="product-class">Product type</label>
-                <input id="product-class" name="product_class" required>
-                <div class="inline-result pending" data-result-for="product_class" aria-live="polite">
-                  <span class="result-status">Not checked</span>
-                  <span class="result-value">Found on label will appear here.</span>
-                  <span class="result-message"></span>
-                </div>
-              </div>
-
-              <div class="field-row" data-field-row="producer">
-                <label for="producer">Producer or company</label>
-                <input id="producer" name="producer" required>
-                <div class="inline-result pending" data-result-for="producer" aria-live="polite">
-                  <span class="result-status">Not checked</span>
-                  <span class="result-value">Found on label will appear here.</span>
-                  <span class="result-message"></span>
-                </div>
-              </div>
-
-              <div class="field-row" data-field-row="country_of_origin">
-                <label for="country">Country</label>
-                <div class="stacked-control">
-                  <select id="country" name="country_of_origin" required>
-                    <option value="">Choose country</option>
-                    <option>United States</option>
-                    <option>Argentina</option>
-                    <option>Australia</option>
-                    <option>Austria</option>
-                    <option>Canada</option>
-                    <option>Chile</option>
-                    <option>France</option>
-                    <option>Germany</option>
-                    <option>Italy</option>
-                    <option>Japan</option>
-                    <option>Mexico</option>
-                    <option>New Zealand</option>
-                    <option>Portugal</option>
-                    <option>South Africa</option>
-                    <option>Spain</option>
-                    <option>United Kingdom</option>
-                    <option value="__other__">Other</option>
-                  </select>
-                  <input id="country-other" class="other-input" type="text" autocomplete="country-name" placeholder="Enter country" hidden>
-                </div>
-                <div class="inline-result pending" data-result-for="country_of_origin" aria-live="polite">
-                  <span class="result-status">Not checked</span>
-                  <span class="result-value">Found on label will appear here.</span>
-                  <span class="result-message"></span>
-                </div>
-              </div>
-
-              <div class="field-row" data-field-row="abv">
-                <label for="abv">Alcohol percentage</label>
-                <div class="suffix-control">
-                  <input id="abv" name="abv" type="number" min="0" max="100" step="0.5" required>
-                  <span>%</span>
-                </div>
-                <div class="inline-result pending" data-result-for="abv" aria-live="polite">
-                  <span class="result-status">Not checked</span>
-                  <span class="result-value">Found on label will appear here.</span>
-                  <span class="result-message"></span>
-                </div>
-              </div>
-
-              <div class="field-row" data-field-row="net_contents">
-                <label for="net-contents">Bottle size</label>
-                <select id="net-contents" name="net_contents" required>
-                  <option value="">Choose size</option>
-                  <option>50 ml</option>
-                  <option>100 ml</option>
-                  <option>187.5 ml</option>
-                  <option>200 ml</option>
-                  <option>375 ml</option>
-                  <option>500 ml</option>
-                  <option>700 ml</option>
-                  <option>750 ml</option>
-                  <option>1 L</option>
-                  <option>1.5 L</option>
-                  <option>1.75 L</option>
-                </select>
-                <div class="inline-result pending" data-result-for="net_contents" aria-live="polite">
-                  <span class="result-status">Not checked</span>
-                  <span class="result-value">Found on label will appear here.</span>
-                  <span class="result-message"></span>
-                </div>
-              </div>
-
-              <div class="field-row warning-row" data-field-row="government_warning">
-                <label for="government-warning">Government warning</label>
-                <textarea id="government-warning" name="government_warning" rows="6" required></textarea>
-                <div class="inline-result pending" data-result-for="government_warning" aria-live="polite">
-                  <span class="result-status">Not checked</span>
-                  <span class="result-value">Found on label will appear here.</span>
-                  <span class="result-message"></span>
-                </div>
-              </div>
-            </div>
-
-          </section>
-        </div>
+        <div id="label-cards" class="label-cards"></div>
 
         <div class="actions">
           <p id="form-status" class="form-status">Add the missing items to check this label.</p>
+          <button id="add-label-button" type="button" class="secondary">Add Label</button>
           <button id="submit-button" type="submit" disabled>Check Label</button>
           <button id="reset-button" type="button" class="secondary">Check Another Label</button>
         </div>
       </form>
+
+      <section id="progress-panel" class="progress-panel" hidden aria-live="polite">
+        <p id="progress-text">Checking labels. This may take a few seconds.</p>
+        <div class="progress-bar" aria-hidden="true"><span></span></div>
+      </section>
 
       <section id="result-panel" class="result-panel" hidden aria-labelledby="result-title">
         <div class="result-summary">
@@ -165,13 +48,148 @@
           </div>
         </div>
 
-        <details class="extracted-details">
+        <div id="batch-summary" class="batch-summary" hidden></div>
+        <div id="batch-results" class="batch-results"></div>
+
+        <details id="single-extracted-details" class="extracted-details">
           <summary>Extracted label text</summary>
           <dl id="extracted-list"></dl>
         </details>
       </section>
+
+      <template id="label-card-template">
+        <article class="label-card">
+          <div class="card-heading">
+            <h2>Label</h2>
+            <button type="button" class="remove-label secondary">Remove</button>
+          </div>
+          <div class="form-layout">
+            <section class="form-section photo-section">
+              <h3>Label photo</h3>
+              <label class="file-picker">
+                <span data-file-name>Choose label photo</span>
+                <input data-field="image" type="file" accept="image/jpeg,image/png,image/webp" required>
+              </label>
+              <img class="image-preview" alt="">
+            </section>
+
+            <section class="form-section data-section">
+              <h3>Application Data</h3>
+              <div class="field-stack">
+                <div class="field-row" data-field-row="brand_name">
+                  <label>Brand name</label>
+                  <input data-field="brand_name" autocomplete="organization" required>
+                  <div class="inline-result pending" data-result-for="brand_name" aria-live="polite">
+                    <span class="result-status">Not checked</span>
+                    <span class="result-value">Found on label will appear here.</span>
+                    <span class="result-message"></span>
+                  </div>
+                </div>
+
+                <div class="field-row" data-field-row="product_class">
+                  <label>Product type</label>
+                  <input data-field="product_class" required>
+                  <div class="inline-result pending" data-result-for="product_class" aria-live="polite">
+                    <span class="result-status">Not checked</span>
+                    <span class="result-value">Found on label will appear here.</span>
+                    <span class="result-message"></span>
+                  </div>
+                </div>
+
+                <div class="field-row" data-field-row="producer">
+                  <label>Producer or company</label>
+                  <input data-field="producer" required>
+                  <div class="inline-result pending" data-result-for="producer" aria-live="polite">
+                    <span class="result-status">Not checked</span>
+                    <span class="result-value">Found on label will appear here.</span>
+                    <span class="result-message"></span>
+                  </div>
+                </div>
+
+                <div class="field-row" data-field-row="country_of_origin">
+                  <label>Country</label>
+                  <div class="stacked-control">
+                    <select data-field="country_of_origin" required>
+                      <option value="">Choose country</option>
+                      <option>United States</option>
+                      <option>Argentina</option>
+                      <option>Australia</option>
+                      <option>Austria</option>
+                      <option>Canada</option>
+                      <option>Chile</option>
+                      <option>France</option>
+                      <option>Germany</option>
+                      <option>Italy</option>
+                      <option>Japan</option>
+                      <option>Mexico</option>
+                      <option>New Zealand</option>
+                      <option>Portugal</option>
+                      <option>South Africa</option>
+                      <option>Spain</option>
+                      <option>United Kingdom</option>
+                      <option value="__other__">Other</option>
+                    </select>
+                    <input class="other-input" type="text" autocomplete="country-name" placeholder="Enter country" hidden>
+                  </div>
+                  <div class="inline-result pending" data-result-for="country_of_origin" aria-live="polite">
+                    <span class="result-status">Not checked</span>
+                    <span class="result-value">Found on label will appear here.</span>
+                    <span class="result-message"></span>
+                  </div>
+                </div>
+
+                <div class="field-row" data-field-row="abv">
+                  <label>Alcohol percentage</label>
+                  <div class="suffix-control">
+                    <input data-field="abv" type="number" min="0" max="100" step="0.5" required>
+                    <span>%</span>
+                  </div>
+                  <div class="inline-result pending" data-result-for="abv" aria-live="polite">
+                    <span class="result-status">Not checked</span>
+                    <span class="result-value">Found on label will appear here.</span>
+                    <span class="result-message"></span>
+                  </div>
+                </div>
+
+                <div class="field-row" data-field-row="net_contents">
+                  <label>Bottle size</label>
+                  <select data-field="net_contents" required>
+                    <option value="">Choose size</option>
+                    <option>50 ml</option>
+                    <option>100 ml</option>
+                    <option>187.5 ml</option>
+                    <option>200 ml</option>
+                    <option>375 ml</option>
+                    <option>500 ml</option>
+                    <option>700 ml</option>
+                    <option>750 ml</option>
+                    <option>1 L</option>
+                    <option>1.5 L</option>
+                    <option>1.75 L</option>
+                  </select>
+                  <div class="inline-result pending" data-result-for="net_contents" aria-live="polite">
+                    <span class="result-status">Not checked</span>
+                    <span class="result-value">Found on label will appear here.</span>
+                    <span class="result-message"></span>
+                  </div>
+                </div>
+
+                <div class="field-row warning-row" data-field-row="government_warning">
+                  <label>Government warning</label>
+                  <textarea data-field="government_warning" rows="6" required></textarea>
+                  <div class="inline-result pending" data-result-for="government_warning" aria-live="polite">
+                    <span class="result-status">Not checked</span>
+                    <span class="result-value">Found on label will appear here.</span>
+                    <span class="result-message"></span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </article>
+      </template>
     </main>
 
-    <script src="/static/app.js?v=phase4-inline-20260621"></script>
+    <script src="/static/app.js?v=phase5-batch-20260621"></script>
   </body>
 </html>
